@@ -1,0 +1,52 @@
+FROM sandbox-node:24-dev
+
+USER root
+
+# Set environment variables
+ENV HOME=/home/vercel-sandbox
+ENV BUN_INSTALL=$HOME/.bun
+ENV PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/playwright-browsers
+ENV NODE_PATH=$BUN_INSTALL/install/global/node_modules
+ENV PATH="$BUN_INSTALL/bin:$HOME/.local/bin:${PATH}"
+
+# Install system dependencies for Playwright/Chromium
+RUN dnf update -y && \
+    dnf -y install \
+    nss \
+    nspr \
+    atk \
+    at-spi2-atk \
+    cups-libs \
+    libdrm \
+    libxkbcommon \
+    mesa-libgbm \
+    alsa-lib \
+    libXcomposite \
+    libXdamage \
+    libXfixes \
+    libXrandr \
+    pango \
+    cairo \
+    liberation-fonts \
+    mesa-libEGL \
+    gtk3 \
+    dbus-glib \
+    libXScrnSaver \
+    xorg-x11-server-Xvfb \
+    google-noto-color-emoji-fonts \
+    && dnf clean all
+
+# Switch to vercel-sandbox user
+USER vercel-sandbox
+
+# Create directories, install Bun, rebrowser-playwright, and Chromium
+RUN mkdir -p $HOME/.bun \
+    $HOME/.cache \
+    $HOME/.local/bin
+
+# Install Bun
+RUN curl -fsSL https://bun.sh/install | bash
+
+# Install rebrowser-playwright and chromium
+RUN bun install -g rebrowser-playwright && \
+    bunx rebrowser-playwright-core install chromium
