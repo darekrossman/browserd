@@ -7,6 +7,11 @@
 import type { ServerWebSocket } from "bun";
 import { handleSessionRequest } from "../api/sessions";
 import { createViewerResponse } from "../client/viewer-template";
+import {
+	type InputMessage,
+	type ServerMessage,
+	serializeServerMessage,
+} from "../protocol/types";
 import { BrowserManager } from "./browser-manager";
 import { CommandQueue } from "./command-queue";
 import {
@@ -19,6 +24,31 @@ import {
 	type WebSocketData,
 	WSHandler,
 } from "./ws-handler";
+
+// SSE Client tracking
+interface SSEClient {
+	id: string;
+	controller: ReadableStreamDefaultController<Uint8Array>;
+	send: (data: string) => void;
+}
+const sseClients = new Map<string, SSEClient>();
+
+/**
+ * Broadcast message to all SSE clients
+ */
+function broadcastToSSE(message: ServerMessage): void {
+	const data = serializeServerMessage(message);
+	for (const client of sseClients.values()) {
+		client.send(data);
+	}
+}
+
+/**
+ * Generate unique SSE client ID
+ */
+function generateSSEClientId(): string {
+	return `sse-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 const PORT = parseInt(process.env.PORT || "3000", 10);
 const HOST = process.env.HOST || "0.0.0.0";
@@ -81,6 +111,8 @@ async function initBrowser(): Promise<void> {
 				}
 			}
 		},
+		// Broadcast frames/events to SSE clients
+		onBroadcast: broadcastToSSE,
 	});
 
 	// Initialize CDP session for screencast
@@ -114,6 +146,117 @@ async function handleRequest(
 		}
 
 		return new Response("WebSocket upgrade failed", { status: 400 });
+	}
+
+	// SSE stream endpoint
+	if (path === "/stream") {
+		const clientId = generateSSEClientId();
+		const encoder = new TextEncoder();
+
+		return new Response(
+			new ReadableStream({
+				start(controller) {
+					// Create client entry
+					const client: SSEClient = {
+						id: clientId,
+						controller,
+						send: (data: string) => {
+							try {
+								controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+							} catch {
+								// Client disconnected, will be cleaned up
+								sseClients.delete(clientId);
+							}
+						},
+					};
+
+					// Register client
+					sseClients.set(clientId, client);
+					console.log(
+						`[sse] Client connected: ${clientId} (${sseClients.size} total)`,
+					);
+
+					// Send connected event
+					controller.enqueue(
+						encoder.encode(
+							`event: connected\ndata: ${JSON.stringify({ clientId })}\n\n`,
+						),
+					);
+
+					// Send viewport info if available
+					const viewport = wsHandler?.getViewport();
+					if (viewport) {
+						controller.enqueue(
+							encoder.encode(
+								`data: ${JSON.stringify({ type: "event", event: "ready", data: { viewport } })}\n\n`,
+							),
+						);
+					}
+
+					// Send last frame if available for quick preview
+					const lastFrame = wsHandler?.getLastFrame();
+					if (lastFrame) {
+						controller.enqueue(
+							encoder.encode(`data: ${JSON.stringify(lastFrame)}\n\n`),
+						);
+					}
+				},
+				cancel() {
+					sseClients.delete(clientId);
+					console.log(
+						`[sse] Client disconnected: ${clientId} (${sseClients.size} remaining)`,
+					);
+				},
+			}),
+			{
+				headers: {
+					"Content-Type": "text/event-stream",
+					"Cache-Control": "no-cache",
+					Connection: "keep-alive",
+					"Access-Control-Allow-Origin": "*",
+				},
+			},
+		);
+	}
+
+	// HTTP input endpoint (for SSE mode)
+	if (path === "/input" && req.method === "POST") {
+		try {
+			const body = await req.json();
+
+			if (body.type === "input") {
+				// Dispatch input to browser
+				await wsHandler?.dispatchInput(body as InputMessage);
+				return Response.json({ ok: true });
+			}
+
+			if (body.type === "cmd" && commandQueue) {
+				// Handle command
+				const result = await commandQueue.enqueue(body);
+				return Response.json(result);
+			}
+
+			return Response.json(
+				{ ok: false, error: "Unknown message type" },
+				{ status: 400 },
+			);
+		} catch (error) {
+			return Response.json(
+				{ ok: false, error: String(error) },
+				{ status: 500 },
+			);
+		}
+	}
+
+	// CORS preflight for /input
+	if (path === "/input" && req.method === "OPTIONS") {
+		return new Response(null, {
+			headers: {
+				"Access-Control-Allow-Origin": "*",
+				"Access-Control-Allow-Methods": "POST, OPTIONS",
+				"Access-Control-Allow-Headers": "Content-Type",
+			},
+		});
 	}
 
 	// Health endpoints
@@ -207,6 +350,8 @@ async function main(): Promise<void> {
 		console.log(`[browserd] Server listening on http://${HOST}:${PORT}`);
 		console.log(`[browserd] Viewer available at http://${HOST}:${PORT}/`);
 		console.log(`[browserd] WebSocket endpoint: ws://${HOST}:${PORT}/ws`);
+		console.log(`[browserd] SSE stream endpoint: http://${HOST}:${PORT}/stream`);
+		console.log(`[browserd] HTTP input endpoint: http://${HOST}:${PORT}/input`);
 	} catch (error) {
 		console.error("[browserd] Failed to start:", error);
 		process.exit(1);

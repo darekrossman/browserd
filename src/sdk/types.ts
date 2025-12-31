@@ -187,6 +187,11 @@ export interface CreateSandboxOptions {
 export type SandboxStatus = "creating" | "ready" | "destroyed";
 
 /**
+ * Transport type for browser communication
+ */
+export type TransportType = "ws" | "sse";
+
+/**
  * Information about a provisioned sandbox
  */
 export interface SandboxInfo {
@@ -200,6 +205,12 @@ export interface SandboxInfo {
 	status: SandboxStatus;
 	/** Creation timestamp */
 	createdAt: number;
+	/**
+	 * Recommended transport for this sandbox
+	 * - "ws": WebSocket (default, best latency)
+	 * - "sse": Server-Sent Events + HTTP POST (for HTTP-only proxies)
+	 */
+	transport?: TransportType;
 }
 
 /**

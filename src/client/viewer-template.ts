@@ -274,6 +274,8 @@ export function generateViewerHTML(options: ViewerOptions = {}): string {
 
       // State
       let ws = null;
+      let eventSource = null;
+      let transport = 'ws';  // 'ws' or 'sse'
       let connected = false;
       let frameCount = 0;
       let lastFpsUpdate = Date.now();
@@ -314,26 +316,92 @@ export function generateViewerHTML(options: ViewerOptions = {}): string {
       // Initial resize
       resizeCanvasDisplay();
 
-      // WebSocket URL
+      // URLs
       const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = wsProtocol + '//' + location.host + '/ws';
+      const streamUrl = location.protocol + '//' + location.host + '/stream';
+      const inputUrl = location.protocol + '//' + location.host + '/input';
 
-      // Connect to WebSocket
-      function connect() {
+      // Check for forced transport via query param
+      const urlParams = new URLSearchParams(location.search);
+      const forcedTransport = urlParams.get('transport');
+
+      // Connect using appropriate transport
+      async function connect() {
+        if (forcedTransport === 'sse') {
+          transport = 'sse';
+          connectSSE();
+          return;
+        }
+
+        if (forcedTransport === 'ws') {
+          transport = 'ws';
+          connectWebSocket();
+          return;
+        }
+
+        // Auto-detect: try WebSocket first, fall back to SSE
+        try {
+          await connectWebSocketWithTimeout();
+          transport = 'ws';
+        } catch (err) {
+          console.log('WebSocket unavailable, falling back to SSE:', err.message);
+          transport = 'sse';
+          connectSSE();
+        }
+      }
+
+      // Connect to WebSocket with timeout
+      function connectWebSocketWithTimeout() {
+        return new Promise((resolve, reject) => {
+          setStatus('connecting');
+          ws = new WebSocket(wsUrl);
+
+          const timeout = setTimeout(() => {
+            ws.close();
+            reject(new Error('WebSocket connection timeout'));
+          }, 3000);
+
+          ws.onopen = () => {
+            clearTimeout(timeout);
+            setStatus('connected');
+            // Start ping interval
+            setInterval(sendPing, 5000);
+            resolve();
+          };
+
+          ws.onerror = (err) => {
+            clearTimeout(timeout);
+            reject(new Error('WebSocket error'));
+          };
+
+          ws.onclose = () => {
+            if (connected) {
+              setStatus('disconnected');
+              // Reconnect after delay
+              setTimeout(() => connectWebSocket(), 2000);
+            }
+          };
+
+          ws.onmessage = (event) => {
+            handleMessage(JSON.parse(event.data));
+          };
+        });
+      }
+
+      // Connect to WebSocket (without timeout, for reconnects)
+      function connectWebSocket() {
         setStatus('connecting');
-
         ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
           setStatus('connected');
-          // Start ping interval
-          setInterval(sendPing, 5000);
         };
 
         ws.onclose = () => {
           setStatus('disconnected');
           // Reconnect after delay
-          setTimeout(connect, 2000);
+          setTimeout(connectWebSocket, 2000);
         };
 
         ws.onerror = (err) => {
@@ -343,6 +411,41 @@ export function generateViewerHTML(options: ViewerOptions = {}): string {
         ws.onmessage = (event) => {
           handleMessage(JSON.parse(event.data));
         };
+      }
+
+      // Connect via Server-Sent Events
+      function connectSSE() {
+        setStatus('connecting');
+        statusText.textContent = 'Connecting (SSE)';
+
+        eventSource = new EventSource(streamUrl);
+
+        eventSource.onopen = () => {
+          setStatus('connected');
+          statusText.textContent = 'Connected (SSE)';
+        };
+
+        eventSource.onmessage = (event) => {
+          try {
+            handleMessage(JSON.parse(event.data));
+          } catch (err) {
+            console.error('Failed to parse SSE message:', err);
+          }
+        };
+
+        eventSource.onerror = () => {
+          if (connected) {
+            setStatus('disconnected');
+            statusText.textContent = 'Reconnecting (SSE)';
+          }
+          // EventSource auto-reconnects
+        };
+
+        // Handle custom events
+        eventSource.addEventListener('connected', (event) => {
+          const data = JSON.parse(event.data);
+          console.log('SSE connected:', data.clientId);
+        });
       }
 
       // Handle incoming message
@@ -413,9 +516,11 @@ export function generateViewerHTML(options: ViewerOptions = {}): string {
 
       // Send ping for latency measurement
       function sendPing() {
-        if (ws && ws.readyState === WebSocket.OPEN) {
+        // Only WebSocket supports ping/pong for latency
+        if (transport === 'ws' && ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'ping', t: Date.now() }));
         }
+        // SSE mode: latency measurement would require HTTP roundtrip, skip for now
       }
 
       // Set connection status
@@ -427,25 +532,45 @@ export function generateViewerHTML(options: ViewerOptions = {}): string {
 
       // Send command
       function sendCommand(method, params = {}) {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            id: 'cmd-' + Date.now(),
-            type: 'cmd',
-            method,
-            params
-          }));
+        const msg = {
+          id: 'cmd-' + Date.now(),
+          type: 'cmd',
+          method,
+          params
+        };
+
+        if (transport === 'ws' && ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(msg));
+        } else if (transport === 'sse') {
+          // HTTP POST for SSE mode
+          fetch(inputUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(msg)
+          }).then(res => res.json()).then(result => {
+            if (result) handleMessage(result);
+          }).catch(err => console.error('Command error:', err));
         }
       }
 
       // Send input event
       function sendInput(device, action, data = {}) {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'input',
-            device,
-            action,
-            ...data
-          }));
+        const msg = {
+          type: 'input',
+          device,
+          action,
+          ...data
+        };
+
+        if (transport === 'ws' && ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(msg));
+        } else if (transport === 'sse') {
+          // HTTP POST for SSE mode (fire and forget for input)
+          fetch(inputUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(msg)
+          }).catch(err => console.error('Input error:', err));
         }
       }
 

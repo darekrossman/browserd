@@ -31,6 +31,8 @@ export interface WSHandlerOptions {
 		ws: ServerWebSocket<WebSocketData>,
 		cmd: CommandMessage,
 	) => Promise<void>;
+	/** External broadcast callback for SSE clients */
+	onBroadcast?: (message: ServerMessage) => void;
 }
 
 /**
@@ -133,7 +135,7 @@ export class WSHandler {
 
 			case "input":
 				// Dispatch input to browser
-				await this.handleInput(message);
+				await this.dispatchInput(message);
 				break;
 
 			case "cmd":
@@ -145,8 +147,9 @@ export class WSHandler {
 
 	/**
 	 * Handle input message (mouse/keyboard)
+	 * Public to allow HTTP input endpoint to dispatch input
 	 */
-	private async handleInput(input: InputMessage): Promise<void> {
+	async dispatchInput(input: InputMessage): Promise<void> {
 		if (!this.cdpSession) {
 			return;
 		}
@@ -211,7 +214,7 @@ export class WSHandler {
 		// Store for new clients
 		this.frameBuffer = frame;
 
-		// Broadcast to all clients
+		// Broadcast to all WebSocket clients
 		const message = serializeServerMessage(frame);
 		for (const client of this.clients.values()) {
 			try {
@@ -220,6 +223,9 @@ export class WSHandler {
 				// Client might have disconnected
 			}
 		}
+
+		// Notify external listeners (SSE clients)
+		this.options.onBroadcast?.(frame);
 	}
 
 	/**
@@ -234,6 +240,9 @@ export class WSHandler {
 				// Client might have disconnected
 			}
 		}
+
+		// Notify external listeners (SSE clients)
+		this.options.onBroadcast?.(event);
 	}
 
 	/**
@@ -259,6 +268,20 @@ export class WSHandler {
 	 */
 	getCDPSession(): CDPSessionManager | null {
 		return this.cdpSession;
+	}
+
+	/**
+	 * Get the last frame for new clients
+	 */
+	getLastFrame(): FrameMessage | null {
+		return this.frameBuffer;
+	}
+
+	/**
+	 * Get viewport info for new clients
+	 */
+	getViewport(): { w: number; h: number; dpr: number } | null {
+		return this.cdpSession?.getViewport() ?? null;
 	}
 
 	/**

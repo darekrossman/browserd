@@ -423,12 +423,15 @@ Documentation:
 		const sandboxId = sprite.id ?? sprite.name;
 
 		// Create initial sandbox info
+		// Note: transport will be set to 'sse' if useLocalProxy is false,
+		// since sprite URL HTTPS proxy doesn't support WebSocket
 		const info: SandboxInfo = {
 			id: sandboxId,
 			domain: spriteUrl,
 			wsUrl: `${spriteUrl.replace("https://", "wss://")}/ws`,
 			status: "creating",
 			createdAt: Date.now(),
+			transport: this.useLocalProxy ? "ws" : "sse",
 		};
 
 		this.sprites.set(sandboxId, { sprite, info, createdByUs });
@@ -475,10 +478,10 @@ Documentation:
 				info.wsUrl = `ws://localhost:${proxyPort}/ws`;
 				this.log(`Local proxy started on port ${proxyPort}`, proxyStart);
 			} else {
-				// Warn user that WebSocket won't work through sprite URL
+				// SSE mode: WebSocket won't work through sprite URL, but SSE + HTTP POST will
 				this.log(
-					"WARNING: useLocalProxy=false - WebSocket will NOT work through sprite URL. " +
-						"HTTP endpoints will work but real-time browser control requires WebSocket.",
+					"Using SSE transport (useLocalProxy=false) - viewer will auto-detect and use SSE mode. " +
+						"SSE provides frame streaming, HTTP POST handles input.",
 				);
 			}
 
