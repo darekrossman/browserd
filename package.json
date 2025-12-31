@@ -38,24 +38,22 @@
 		"@fly/sprites": "^0.0.1",
 		"@types/bun": "latest",
 		"@types/tar": "^6.1.13",
+		"@vercel/sandbox": "^1.1.2",
 		"bun-types": "^1.3.5",
 		"playwright": "^1.57.0",
 		"rebrowser-playwright": "^1.52.0",
 		"tar": "^7.5.2",
 		"typescript": "^5.9.3"
 	},
-	"optionalDependencies": {
-		"@vercel/sandbox": "^0.1.0",
-		"@fly/sprites": "^0.0.1"
-	},
 	"peerDependencies": {
-		"@vercel/sandbox": ">=0.1.0"
+		"@fly/sprites": ">=0.0.1",
+		"@vercel/sandbox": ">=1.0.0"
 	},
 	"peerDependenciesMeta": {
-		"@vercel/sandbox": {
+		"@fly/sprites": {
 			"optional": true
 		},
-		"@fly/sprites": {
+		"@vercel/sandbox": {
 			"optional": true
 		}
 	}

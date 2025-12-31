@@ -39,15 +39,16 @@
 export { BrowserdClient } from "./client";
 // Errors
 export { BrowserdError, type BrowserdErrorCode } from "./errors";
+// Providers
+export { LocalSandboxProvider } from "./providers/local";
+export { SpritesSandboxProvider } from "./providers/sprites";
 export type {
 	LocalSandboxProviderOptions,
 	SandboxProvider,
 	SandboxProviderOptions,
+	SpritesSandboxProviderOptions,
 	VercelSandboxProviderOptions,
 } from "./providers/types";
-
-// Providers
-export { LocalSandboxProvider } from "./providers/local";
 export { VercelSandboxProvider } from "./providers/vercel";
 export type { SandboxManagerOptions } from "./sandbox-manager";
 // Sandbox management

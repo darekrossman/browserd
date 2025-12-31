@@ -20,7 +20,13 @@ await Bun.build({
 	naming: bundleName,
 	target: "bun",
 	minify: true,
-	external: ["rebrowser-playwright"],
+	external: [
+		// Playwright - installed on target environment
+		"rebrowser-playwright",
+		// SDK providers - dynamically imported, optional dependencies
+		"@vercel/sandbox",
+		"@fly/sprites",
+	],
 });
 
 await tar.create(

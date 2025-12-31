@@ -8,39 +8,15 @@
  *   bun add @vercel/sandbox
  */
 
+import { Sandbox } from "@vercel/sandbox";
 import { BrowserdError } from "../errors";
 import type { CreateSandboxOptions, SandboxInfo } from "../types";
 import type { SandboxProvider, VercelSandboxProviderOptions } from "./types";
 
-/**
- * Type definitions for @vercel/sandbox
- * These are defined here to avoid requiring the package at compile time.
- * The package is loaded dynamically at runtime.
- */
-interface VercelSandbox {
-	id: string;
-	getHost(): string;
-	runCommand(options: { cmd: string; args: string[] }): Promise<{
-		exitCode: number;
-		stdout: string;
-		stderr: string;
-	}>;
-	close(): Promise<void>;
-}
-
-interface VercelSandboxCreateOptions {
-	resources?: {
-		vcpus?: number;
-	};
-	ports?: number[];
-	runtime?: string;
-	timeout?: number;
-}
-
-interface SandboxModule {
-	Sandbox: {
-		create(options?: VercelSandboxCreateOptions): Promise<VercelSandbox>;
-	};
+interface SandboxEntry {
+	sandbox: Sandbox;
+	info: SandboxInfo;
+	port: number;
 }
 
 /**
@@ -54,11 +30,7 @@ export class VercelSandboxProvider implements SandboxProvider {
 	private blobBaseUrl: string;
 	private runtime: string;
 	private defaultTimeout: number;
-	private sandboxes = new Map<
-		string,
-		{ sandbox: VercelSandbox; info: SandboxInfo }
-	>();
-	private SandboxClass: SandboxModule["Sandbox"] | null = null;
+	private sandboxes = new Map<string, SandboxEntry>();
 
 	constructor(options: VercelSandboxProviderOptions) {
 		this.blobBaseUrl = options.blobBaseUrl.replace(/\/$/, ""); // Remove trailing slash
@@ -67,42 +39,13 @@ export class VercelSandboxProvider implements SandboxProvider {
 	}
 
 	/**
-	 * Lazily load @vercel/sandbox module
-	 *
-	 * Uses dynamic import to avoid compile-time dependency on @vercel/sandbox.
-	 * The package must be installed at runtime when using VercelSandboxProvider.
-	 */
-	private async getSandboxClass(): Promise<SandboxModule["Sandbox"]> {
-		if (this.SandboxClass) {
-			return this.SandboxClass;
-		}
-
-		try {
-			// Use a variable to prevent TypeScript from checking the import
-			const moduleName = "@vercel/sandbox";
-			const module = (await import(
-				/* @vite-ignore */ moduleName
-			)) as SandboxModule;
-			this.SandboxClass = module.Sandbox;
-			return this.SandboxClass;
-		} catch (err) {
-			throw BrowserdError.providerError(
-				"Failed to load @vercel/sandbox. Make sure it is installed: bun add @vercel/sandbox",
-				err instanceof Error ? err : undefined,
-			);
-		}
-	}
-
-	/**
 	 * Create a new sandbox with browserd running
 	 */
 	async create(options?: CreateSandboxOptions): Promise<SandboxInfo> {
-		const Sandbox = await this.getSandboxClass();
-
 		const port = options?.port ?? 3000;
 		const timeout = options?.timeout ?? this.defaultTimeout;
 
-		let sandbox: VercelSandbox;
+		let sandbox: Sandbox;
 
 		try {
 			// Create the Vercel sandbox
@@ -121,9 +64,9 @@ export class VercelSandboxProvider implements SandboxProvider {
 			);
 		}
 
-		const sandboxId = sandbox.id;
-		const domain = `https://${sandbox.getHost()}`;
-		const wsUrl = `wss://${sandbox.getHost()}/ws`;
+		const sandboxId = sandbox.sandboxId;
+		const domain = sandbox.domain(port);
+		const wsUrl = domain.replace("https://", "wss://") + "/ws";
 
 		// Create initial sandbox info
 		const info: SandboxInfo = {
@@ -134,20 +77,20 @@ export class VercelSandboxProvider implements SandboxProvider {
 			createdAt: Date.now(),
 		};
 
-		this.sandboxes.set(sandboxId, { sandbox, info });
+		this.sandboxes.set(sandboxId, { sandbox, info, port });
 
 		try {
 			// Run the install script to set up browserd
 			const installScript = `${this.blobBaseUrl}/install.sh`;
 			const tarballUrl = `${this.blobBaseUrl}/browserd.tar.gz`;
 
-			const installResult = await sandbox.runCommand({
-				cmd: "sh",
-				args: [
+			const installResult = await sandbox.runCommand(
+				"sh",
+				[
 					"-c",
 					`curl -fsSL "${installScript}" | TARBALL_URL="${tarballUrl}" PORT="${port}" sh`,
 				],
-			});
+			);
 
 			if (installResult.exitCode !== 0) {
 				throw new Error(
@@ -185,7 +128,7 @@ export class VercelSandboxProvider implements SandboxProvider {
 		}
 
 		try {
-			await entry.sandbox.close();
+			await entry.sandbox.stop();
 		} catch {
 			// Ignore close errors
 		} finally {

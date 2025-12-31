@@ -28,10 +28,14 @@ const TARGETS = [
 
 // External packages that should not be bundled
 const EXTERNAL_PACKAGES = [
+	// Playwright - installed on target environment
 	"rebrowser-playwright",
 	"rebrowser-playwright-core",
 	"playwright",
 	"playwright-core",
+	// SDK providers - dynamically imported, optional dependencies
+	"@vercel/sandbox",
+	"@fly/sprites",
 ];
 
 /**
