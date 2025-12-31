@@ -18,6 +18,7 @@ await Bun.build({
 	entrypoints: [entry],
 	outdir: buildDir,
 	naming: bundleName,
+	target: "bun",
 	minify: true,
 	external: ["rebrowser-playwright"],
 });
