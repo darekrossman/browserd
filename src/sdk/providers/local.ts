@@ -2,8 +2,8 @@
  * Local Docker Provider
  *
  * Provider for running browserd in local Docker containers.
- * Simulates remote provider behavior by copying a pre-built binary tarball
- * into the container and executing it, rather than mounting local source.
+ * Simulates remote provider behavior by copying a pre-built JS bundle tarball
+ * into the container and running it with `bun browserd.js`.
  *
  * Uses OrbStack's DNS feature (container-name.orb.local) for unique hostnames,
  * allowing multiple containers to run concurrently without port conflicts.
@@ -14,32 +14,11 @@ import { BrowserdError } from "../errors";
 import type { CreateSandboxOptions, SandboxInfo } from "../types";
 import type { LocalSandboxProviderOptions, SandboxProvider } from "./types";
 
-// Binary tarballs by architecture (relative to package root)
-const BINARY_TARBALLS: Record<string, string> = {
-	x64: "binaries/browserd.bun-linux-x64-baseline-v1.3.5.tar.gz",
-	arm64: "binaries/browserd.bun-linux-arm64.tar.gz",
-};
-
-/**
- * Get the appropriate binary tarball for the current host architecture
- */
-function getBinaryTarball(): string {
-	const arch = process.arch; // 'arm64', 'x64', etc.
-	const tarball = BINARY_TARBALLS[arch];
-
-	if (!tarball) {
-		throw new Error(
-			`Unsupported architecture: ${arch}. Supported: ${Object.keys(BINARY_TARBALLS).join(", ")}`,
-		);
-	}
-
-	return tarball;
-}
+// Single bundled tarball (architecture-agnostic JS bundle)
+const BUNDLE_TARBALL = "bundle/browserd.tar.gz";
 
 // Container paths
-const CONTAINER_HOME = "/home/vercel-sandbox";
 const CONTAINER_WORKDIR = "/vercel/sandbox";
-const CONTAINER_BIN_DIR = `${CONTAINER_HOME}/.local/bin`;
 
 interface ContainerEntry {
 	containerId: string;
@@ -52,7 +31,7 @@ interface ContainerEntry {
  * Local Docker Provider implementation
  *
  * Runs browserd in local Docker containers for development and testing.
- * Simulates remote provider behavior by deploying a pre-built binary.
+ * Simulates remote provider behavior by deploying a pre-built JS bundle.
  * Each container gets a unique hostname via OrbStack DNS (container-name.orb.local),
  * eliminating port conflicts when running multiple instances.
  */
@@ -103,10 +82,10 @@ export class LocalSandboxProvider implements SandboxProvider {
 		await this.ensureImage();
 		this.log("ensureImage() completed", stepStart);
 
-		// Ensure binary tarball exists
+		// Ensure bundle tarball exists
 		stepStart = Date.now();
-		await this.ensureBinaryTarball();
-		this.log("ensureBinaryTarball() completed", stepStart);
+		await this.ensureBundleTarball();
+		this.log("ensureBundleTarball() completed", stepStart);
 
 		// Generate unique container name and ID
 		const sandboxId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -293,16 +272,15 @@ export class LocalSandboxProvider implements SandboxProvider {
 	}
 
 	/**
-	 * Ensure the binary tarball exists for current architecture
+	 * Ensure the bundle tarball exists
 	 */
-	private async ensureBinaryTarball(): Promise<void> {
-		const tarball = getBinaryTarball();
-		const tarballPath = path.join(this.packageDir, tarball);
+	private async ensureBundleTarball(): Promise<void> {
+		const tarballPath = path.join(this.packageDir, BUNDLE_TARBALL);
 		const file = Bun.file(tarballPath);
 
 		if (!(await file.exists())) {
 			throw BrowserdError.providerError(
-				`Binary tarball not found at ${tarballPath}. Run 'bun run build:binary' first.`,
+				`Bundle tarball not found at ${tarballPath}. Run 'bun run build:bundle' first.`,
 			);
 		}
 	}
@@ -338,11 +316,10 @@ export class LocalSandboxProvider implements SandboxProvider {
 	}
 
 	/**
-	 * Copy the binary tarball into the container
+	 * Copy the bundle tarball into the container
 	 */
 	private async copyTarballToContainer(containerName: string): Promise<void> {
-		const tarball = getBinaryTarball();
-		const tarballPath = path.join(this.packageDir, tarball);
+		const tarballPath = path.join(this.packageDir, BUNDLE_TARBALL);
 
 		// Copy tarball to container working directory
 		await this.exec([
@@ -355,33 +332,31 @@ export class LocalSandboxProvider implements SandboxProvider {
 
 	/**
 	 * Setup and start browserd in the container
-	 * - Extract tarball
-	 * - Move binary to ~/.local/bin
+	 * - Extract tarball (JS bundle)
+	 * - Run with bun browserd.js
 	 * - Clean up tarball
-	 * - Start browserd
 	 */
 	private async setupAndStartBrowserd(containerName: string): Promise<void> {
 		// Build the setup command
+		// Extract tarball and find browserd.js (handles any path structure in tarball)
 		const setupScript = [
-			// Create bin directory
-			`mkdir -p ${CONTAINER_BIN_DIR}`,
-			// Extract tarball (contains 'browserd' binary)
-			`tar -xzf ${CONTAINER_WORKDIR}/browserd.tar.gz -C ${CONTAINER_WORKDIR}`,
-			// Move binary to bin directory
-			`mv ${CONTAINER_WORKDIR}/browserd ${CONTAINER_BIN_DIR}/browserd`,
-			// Make executable
-			`chmod +x ${CONTAINER_BIN_DIR}/browserd`,
-			// Remove tarball
+			// Extract tarball to temp location
+			`mkdir -p /tmp/browserd-extract`,
+			`tar -xzf ${CONTAINER_WORKDIR}/browserd.tar.gz -C /tmp/browserd-extract`,
+			// Find and move browserd.js to workdir
+			`find /tmp/browserd-extract -name 'browserd.js' -exec mv {} ${CONTAINER_WORKDIR}/browserd.js \\;`,
+			// Clean up
+			`rm -rf /tmp/browserd-extract`,
 			`rm ${CONTAINER_WORKDIR}/browserd.tar.gz`,
 		].join(" && ");
 
 		// Run setup commands
 		await this.dockerExec(containerName, ["bash", "-c", setupScript]);
 
-		// Start browserd in background
+		// Start browserd with bun in background
 		const startCommand = this.headed
-			? `Xvfb :99 -screen 0 1280x720x24 &>/dev/null & sleep 0.2 && DISPLAY=:99 ${CONTAINER_BIN_DIR}/browserd`
-			: `${CONTAINER_BIN_DIR}/browserd`;
+			? `Xvfb :99 -screen 0 1280x720x24 &>/dev/null & sleep 0.2 && DISPLAY=:99 bun ${CONTAINER_WORKDIR}/browserd.js`
+			: `bun ${CONTAINER_WORKDIR}/browserd.js`;
 
 		// Execute browserd in detached mode
 		await this.dockerExec(containerName, [

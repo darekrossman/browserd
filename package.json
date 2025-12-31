@@ -9,6 +9,7 @@
 	"scripts": {
 		"dev": "bun --watch run src/server/index.ts",
 		"start": "bun run src/server/index.ts",
+		"bundle": "bun run scripts/build.ts",
 		"lint": "biome check .",
 		"lint:fix": "biome check --write --unsafe .",
 		"test": "bun test",
