@@ -34,7 +34,6 @@ async function main() {
 	const provider = new SpritesSandboxProvider({
 		token,
 		spriteName,
-		localProxyPort: 3000,
 		debug: true,
 	});
 
@@ -60,7 +59,7 @@ async function main() {
 		// console.log(`Screenshot size: ${screenshot.data.length} bytes (base64)`);
 
 		// console.log("\n--- Cleanup ---");
-		// await manager.destroy(sandbox.id);
+		await manager.destroy(sandbox.id);
 		// console.log("Sandbox destroyed successfully");
 	} catch (err) {
 		console.error("\n--- Error ---");

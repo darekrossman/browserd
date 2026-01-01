@@ -13,10 +13,12 @@ import { isPongMessage, isResultMessage } from "../protocol/types";
 import { BrowserdError } from "./errors";
 import { CommandQueue } from "./internal/command-queue";
 import { ConnectionManager } from "./internal/connection";
+import { SSEConnectionManager } from "./internal/sse-connection";
 import type {
 	BrowserdClientOptions,
 	ClickOptions,
 	ConnectionState,
+	ConnectionStateChange,
 	EvaluateOptions,
 	FillOptions,
 	HoverOptions,
@@ -25,29 +27,58 @@ import type {
 	PressOptions,
 	ScreenshotOptions,
 	ScreenshotResult,
+	TransportType,
 	TypeOptions,
 	WaitOptions,
 } from "./types";
 
 /**
+ * Common interface for connection managers
+ */
+interface IConnectionManager {
+	connect(): Promise<void>;
+	close(): Promise<void>;
+	send(message: unknown): void;
+	isConnected(): boolean;
+	getState(): ConnectionState;
+	onMessage(handler: (message: ServerMessage) => void): () => void;
+	onStateChange(handler: (change: ConnectionStateChange) => void): () => void;
+	onError(handler: (error: Error) => void): () => void;
+}
+
+/**
  * Client for connecting to and controlling a remote browserd instance
  */
 export class BrowserdClient {
-	private connection: ConnectionManager;
+	private connection: IConnectionManager;
 	private commands: CommandQueue;
 	private defaultTimeout: number;
 	private pingHandlers: Array<(latency: number) => void> = [];
+	private transport: TransportType;
 
 	constructor(options: BrowserdClientOptions) {
 		this.defaultTimeout = options.timeout ?? 30000;
+		this.transport = options.transport ?? "ws";
 
-		this.connection = new ConnectionManager({
-			url: options.url,
-			timeout: options.timeout,
-			autoReconnect: options.autoReconnect,
-			reconnectInterval: options.reconnectInterval,
-			maxReconnectAttempts: options.maxReconnectAttempts,
-		});
+		// Create appropriate connection manager based on transport
+		if (this.transport === "sse") {
+			this.connection = new SSEConnectionManager({
+				url: options.url,
+				timeout: options.timeout,
+				autoReconnect: options.autoReconnect,
+				reconnectInterval: options.reconnectInterval,
+				maxReconnectAttempts: options.maxReconnectAttempts,
+				authToken: options.authToken,
+			});
+		} else {
+			this.connection = new ConnectionManager({
+				url: options.url,
+				timeout: options.timeout,
+				autoReconnect: options.autoReconnect,
+				reconnectInterval: options.reconnectInterval,
+				maxReconnectAttempts: options.maxReconnectAttempts,
+			});
+		}
 
 		this.commands = new CommandQueue({
 			defaultTimeout: this.defaultTimeout,
@@ -70,6 +101,13 @@ export class BrowserdClient {
 				);
 			}
 		});
+	}
+
+	/**
+	 * Get the transport type being used
+	 */
+	getTransport(): TransportType {
+		return this.transport;
 	}
 
 	// ============================================================================

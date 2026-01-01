@@ -93,7 +93,7 @@ export class SpritesSandboxProvider implements SandboxProvider {
 		this.defaultTimeout = options.defaultTimeout ?? 300000;
 		this.debug = options.debug ?? false;
 		this.blobBaseUrl = options.blobBaseUrl;
-		this.useLocalProxy = options.useLocalProxy ?? true;
+		this.useLocalProxy = options.useLocalProxy ?? false;
 		this.localProxyPort = options.localProxyPort;
 		this.autoInstallCli = options.autoInstallCli ?? false;
 	}
@@ -385,16 +385,32 @@ Documentation:
 
 		// Get or create sprite
 		if (this.spriteName) {
-			// Reuse existing sprite
-			this.log(`Getting existing sprite: ${this.spriteName}`);
+			// Try to get existing sprite, create if it doesn't exist
+			this.log(`Getting sprite: ${this.spriteName}`);
 			try {
 				sprite = (await client.getSprite(this.spriteName)) as SpriteWithUrl;
-				this.log(`Got sprite: ${sprite.name}, url: ${sprite.url}`);
+				this.log(`Got existing sprite: ${sprite.name}, url: ${sprite.url}`);
 			} catch (err) {
-				throw BrowserdError.providerError(
-					`Sprite '${this.spriteName}' not found. Create it first with: sprite create ${this.spriteName}`,
-					err instanceof Error ? err : undefined,
-				);
+				// Sprite doesn't exist, create it
+				this.log(`Sprite '${this.spriteName}' not found, creating it`);
+				try {
+					sprite = (await client.createSprite(this.spriteName)) as SpriteWithUrl;
+					createdByUs = true;
+					this.log(`Created sprite: ${sprite.name}`);
+
+					// Wait for sprite to be ready and have a URL
+					sprite = await this.waitForSpriteReady(
+						client,
+						this.spriteName,
+						30000,
+					);
+					this.log(`Sprite ready: ${sprite.name}, url: ${sprite.url}`);
+				} catch (createErr) {
+					throw BrowserdError.sandboxCreationFailed(
+						`Failed to create sprite '${this.spriteName}': ${createErr instanceof Error ? createErr.message : String(createErr)}`,
+						createErr instanceof Error ? createErr : undefined,
+					);
+				}
 			}
 		} else {
 			// Create new sprite
@@ -404,6 +420,10 @@ Documentation:
 				sprite = (await client.createSprite(newName)) as SpriteWithUrl;
 				createdByUs = true;
 				this.log(`Created sprite: ${sprite.name}`);
+
+				// Wait for sprite to be ready and have a URL
+				sprite = await this.waitForSpriteReady(client, newName, 30000);
+				this.log(`Sprite ready: ${sprite.name}, url: ${sprite.url}`);
 			} catch (err) {
 				throw BrowserdError.sandboxCreationFailed(
 					`Failed to create sprite: ${err instanceof Error ? err.message : String(err)}`,
@@ -432,6 +452,8 @@ Documentation:
 			status: "creating",
 			createdAt: Date.now(),
 			transport: this.useLocalProxy ? "ws" : "sse",
+			// Include auth token for SSE mode (required for sprites.dev proxy)
+			authToken: this.useLocalProxy ? undefined : this.token,
 		};
 
 		this.sprites.set(sandboxId, { sprite, info, createdByUs });
@@ -479,10 +501,14 @@ Documentation:
 				this.log(`Local proxy started on port ${proxyPort}`, proxyStart);
 			} else {
 				// SSE mode: WebSocket won't work through sprite URL, but SSE + HTTP POST will
+				// Make the URL public so users can access the viewer in their browser
+				this.log("Making sprite URL public for SSE access");
+				await this.makeUrlPublic(sprite.name);
 				this.log(
 					"Using SSE transport (useLocalProxy=false) - viewer will auto-detect and use SSE mode. " +
 						"SSE provides frame streaming, HTTP POST handles input.",
 				);
+				this.log(`Public viewer URL: ${spriteUrl}`);
 			}
 
 			// Update status to ready
@@ -521,17 +547,25 @@ Documentation:
 				entry.proxyProcess = undefined;
 			}
 
-			// Stop browserd service
+			// Fully stop browserd service using API (avoids jq dependency)
 			this.log("Stopping browserd service");
-			await entry.sprite
-				.exec("sprite-env services delete browserd 2>/dev/null || true")
-				.catch(() => {});
+			// Signal the service to stop
+			await this.execSimple(
+				entry.sprite,
+				"sprite-env curl -X POST /v1/services/browserd/signal -d '{\"signal\":\"TERM\"}' 2>/dev/null || true",
+			).catch(() => {});
+			// Delete the service
+			await this.execSimple(
+				entry.sprite,
+				"sprite-env curl -X DELETE /v1/services/browserd 2>/dev/null || true",
+			).catch(() => {});
+			// Kill any orphaned processes
+			await this.execSimple(
+				entry.sprite,
+				"pkill -f browserd.js 2>/dev/null || true",
+			).catch(() => {});
 
-			// Delete sprite only if we created it
-			if (entry.createdByUs) {
-				this.log("Deleting sprite (created by us)");
-				await entry.sprite.delete().catch(() => {});
-			}
+			// Note: We intentionally don't delete the sprite - it can be reused
 		} catch {
 			// Ignore cleanup errors
 		} finally {
@@ -647,6 +681,37 @@ Documentation:
 	}
 
 	/**
+	 * Wait for a newly created sprite to be ready and have a URL
+	 */
+	private async waitForSpriteReady(
+		client: SpritesClient,
+		spriteName: string,
+		timeout: number,
+	): Promise<SpriteWithUrl> {
+		const deadline = Date.now() + timeout;
+		const pollInterval = 1000;
+
+		this.log(`Waiting for sprite '${spriteName}' to be ready`);
+
+		while (Date.now() < deadline) {
+			try {
+				const sprite = (await client.getSprite(spriteName)) as SpriteWithUrl;
+				if (sprite.url) {
+					return sprite;
+				}
+				this.log(`Sprite exists but no URL yet, waiting...`);
+			} catch {
+				this.log(`Sprite not ready yet, waiting...`);
+			}
+			await sleep(pollInterval);
+		}
+
+		throw new Error(
+			`Sprite '${spriteName}' did not become ready within ${timeout}ms`,
+		);
+	}
+
+	/**
 	 * Wait for local proxy to be ready
 	 */
 	private async waitForProxyReady(
@@ -725,14 +790,14 @@ Documentation:
 	}
 
 	/**
-	 * Execute a command with login shell to get proper PATH (includes bun)
-	 * Uses execFile instead of exec because exec has issues with the SDK
+	 * Execute a command with proper shell environment.
+	 * Uses execFile with bash -lc as recommended by sprites SDK docs.
 	 */
 	private async execWithShell(
 		sprite: SpriteWithUrl,
 		command: string,
 	): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-		// Use execFile with bash -lc to run command in login shell
+		// Use execFile with bash -lc as per SDK docs for shell features
 		const result = await sprite.execFile("bash", ["-lc", command]);
 		return {
 			stdout: result.stdout.toString(),
@@ -754,6 +819,25 @@ Documentation:
 			stderr: result.stderr.toString(),
 			exitCode: result.exitCode,
 		};
+	}
+
+	/**
+	 * Make the sprite URL public for browser access
+	 * Uses the sprite CLI to update URL auth settings
+	 */
+	private async makeUrlPublic(spriteName: string): Promise<void> {
+		const result = Bun.spawnSync(
+			["sprite", "url", "update", "--auth", "public", "-s", spriteName],
+			{
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		if (result.exitCode !== 0) {
+			const stderr = result.stderr.toString();
+			this.log(`Warning: Failed to make URL public: ${stderr}`);
+			// Non-fatal - continue anyway, auth token will still work
+		}
 	}
 
 	/**
@@ -820,12 +904,39 @@ Documentation:
 	 * See: https://docs.sprites.dev/concepts/services/
 	 */
 	private async deployAndStartBrowserd(sprite: SpriteWithUrl): Promise<void> {
-		// First, stop any existing browserd service
+		// Check if browserd service is already running and healthy
+		try {
+			const healthCheck = await this.execWithShell(
+				sprite,
+				"curl -sf http://localhost:3000/readyz",
+			);
+			if (healthCheck.exitCode === 0 && healthCheck.stdout.includes("ready")) {
+				this.log("Browserd service already running and healthy, reusing it");
+				return;
+			}
+		} catch {
+			// Service not running or not healthy, continue with setup
+		}
+
+		// Stop any existing browserd service that's not healthy
 		this.log("Stopping any existing browserd service");
-		await this.execWithShell(
+		// Signal the service to stop
+		await this.execSimple(
 			sprite,
-			"sprite-env services delete browserd 2>/dev/null || true",
+			"sprite-env curl -X POST /v1/services/browserd/signal -d '{\"signal\":\"TERM\"}' 2>/dev/null || true",
 		).catch(() => {});
+		// Delete the service via API (doesn't require jq)
+		await this.execSimple(
+			sprite,
+			"sprite-env curl -X DELETE /v1/services/browserd 2>/dev/null || true",
+		).catch(() => {});
+		// Also kill any orphaned process on port 3000
+		await this.execSimple(
+			sprite,
+			"pkill -f browserd.js 2>/dev/null || true",
+		).catch(() => {});
+		// Give processes time to exit
+		await new Promise((resolve) => setTimeout(resolve, 1000));
 
 		// Deploy browserd bundle
 		this.log("Deploying browserd bundle");
@@ -903,35 +1014,33 @@ Documentation:
 		}
 		this.log("Bundle deployed");
 
-		// Create browserd service using sprite-env CLI
+		// Create browserd service using sprite-env curl API (avoids jq dependency)
 		// See: https://docs.sprites.dev/concepts/services/
 		this.log("Creating browserd service");
 
-		let serviceCmd: string;
+		let serviceJson: string;
 		if (this.headed) {
 			// With Xvfb for headed mode
-			// Use bash -c to set up display and env vars
-			serviceCmd = [
-				"sprite-env services create browserd",
-				"--cmd bash",
-				`--args "-c,Xvfb :99 -screen 0 1280x720x24 &>/dev/null & sleep 0.5 && DISPLAY=:99 bun /home/sprite/browserd.js"`,
-				"--http-port 3000",
-				"--env HEADLESS=false",
-				"--no-stream",
-			].join(" ");
+			serviceJson = JSON.stringify({
+				cmd: "bash",
+				args: ["-c", "Xvfb :99 -screen 0 1280x720x24 &>/dev/null & sleep 0.5 && DISPLAY=:99 bun /home/sprite/browserd.js"],
+				http_port: 3000,
+				env: { HEADLESS: "false" },
+			});
 		} else {
 			// Headless mode
-			serviceCmd = [
-				"sprite-env services create browserd",
-				"--cmd bun",
-				"--args /home/sprite/browserd.js",
-				"--http-port 3000",
-				"--env HEADLESS=true",
-				"--no-stream",
-			].join(" ");
+			serviceJson = JSON.stringify({
+				cmd: "bun",
+				args: ["/home/sprite/browserd.js"],
+				http_port: 3000,
+				env: { HEADLESS: "true" },
+			});
 		}
 
-		const serviceResult = await this.execWithShell(sprite, serviceCmd);
+		const serviceResult = await this.execSimple(
+			sprite,
+			`sprite-env curl -X PUT /v1/services/browserd -d '${serviceJson}'`,
+		);
 		if (serviceResult.exitCode !== 0) {
 			throw new Error(
 				`Failed to create browserd service: ${serviceResult.stderr}`,
@@ -941,40 +1050,45 @@ Documentation:
 	}
 
 	/**
-	 * Wait for browserd to be ready by polling the health endpoint
+	 * Wait for browserd to be ready by polling the health endpoint internally
 	 */
 	private async waitForReady(
 		sandboxId: string,
-		spriteUrl: string,
+		_spriteUrl: string,
 		timeout: number,
 	): Promise<boolean> {
-		const healthUrl = `${spriteUrl}/readyz`;
-		const deadline = Date.now() + timeout;
-		const pollInterval = 2000; // Sprites may need to wake from hibernation
+		const entry = this.sprites.get(sandboxId);
+		if (!entry) {
+			return false;
+		}
 
-		this.log(`Waiting for ${healthUrl} to be ready`);
+		const deadline = Date.now() + timeout;
+		const pollInterval = 2000;
+
+		this.log("Waiting for browserd to be ready (checking internally)");
 
 		while (Date.now() < deadline) {
 			try {
-				const response = await fetch(healthUrl, {
-					method: "GET",
-					signal: AbortSignal.timeout(10000),
-				});
-
-				if (response.ok) {
+				// Check health internally via curl on the sprite
+				// This avoids sprite URL proxy auth requirements
+				const result = await this.execWithShell(
+					entry.sprite,
+					"curl -sf http://localhost:3000/readyz",
+				);
+				if (result.exitCode === 0 && result.stdout.includes("ready")) {
+					this.log("Health check passed");
 					return true;
 				}
-				this.log(`Health check returned ${response.status}`);
+				this.log(`Health check not ready: ${result.stdout}`);
 			} catch (err) {
-				// Server not ready yet (may be waking from hibernation)
+				// Server not ready yet
 				this.log(
 					`Health check failed: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}
 
 			// Check if sandbox was destroyed while waiting
-			const entry = this.sprites.get(sandboxId);
-			if (!entry || entry.info.status === "destroyed") {
+			if (entry.info.status === "destroyed") {
 				return false;
 			}
 

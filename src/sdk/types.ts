@@ -14,8 +14,18 @@ import type { Viewport } from "../protocol/types";
  * Configuration options for BrowserdClient
  */
 export interface BrowserdClientOptions {
-	/** WebSocket URL to connect to (e.g., "ws://localhost:3000/ws") */
+	/**
+	 * URL to connect to
+	 * - For WebSocket: "ws://localhost:3000/ws" or "wss://..."
+	 * - For SSE: "http://localhost:3000" or "https://..." (base URL)
+	 */
 	url: string;
+	/**
+	 * Transport type to use (default: "ws")
+	 * - "ws": WebSocket (best latency, requires WebSocket support)
+	 * - "sse": Server-Sent Events + HTTP POST (works through HTTP-only proxies)
+	 */
+	transport?: TransportType;
 	/** Default timeout for commands in milliseconds (default: 30000) */
 	timeout?: number;
 	/** Whether to automatically reconnect on disconnect (default: true) */
@@ -24,6 +34,8 @@ export interface BrowserdClientOptions {
 	reconnectInterval?: number;
 	/** Maximum number of reconnect attempts (default: 5) */
 	maxReconnectAttempts?: number;
+	/** Auth token for authenticated SSE connections (e.g., sprites.dev) */
+	authToken?: string;
 }
 
 // ============================================================================
@@ -211,6 +223,8 @@ export interface SandboxInfo {
 	 * - "sse": Server-Sent Events + HTTP POST (for HTTP-only proxies)
 	 */
 	transport?: TransportType;
+	/** Auth token for authenticated connections (e.g., sprites.dev SSE mode) */
+	authToken?: string;
 }
 
 /**

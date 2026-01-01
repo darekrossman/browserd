@@ -59,9 +59,11 @@ export class SandboxManager {
 		// Track the sandbox
 		this.sandboxes.set(sandbox.id, sandbox);
 
-		// Create and connect client
+		// Create and connect client with appropriate transport
 		const client = new BrowserdClient({
 			url: sandbox.wsUrl,
+			transport: sandbox.transport ?? "ws",
+			authToken: sandbox.authToken,
 			...this.clientOptions,
 		});
 
