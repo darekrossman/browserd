@@ -230,11 +230,25 @@ export interface SandboxInfo {
 }
 
 /**
+ * Session management methods returned from sandbox creation
+ */
+export interface SessionMethods {
+	/** Create a new browser session and return a connected client ready to use */
+	createSession: (options?: CreateSessionOptions) => Promise<import("./client").BrowserdClient>;
+	/** List all active sessions */
+	listSessions: () => Promise<ListSessionsResponse>;
+	/** Get an existing session's connected client (cached or creates new connection) */
+	getSession: (sessionId: string) => Promise<import("./client").BrowserdClient>;
+	/** Get session info without connecting */
+	getSessionInfo: (sessionId: string) => Promise<SessionInfo>;
+	/** Destroy a session */
+	destroySession: (sessionId: string) => Promise<void>;
+}
+
+/**
  * Result of creating a sandbox with manager
  */
-export interface CreateSandboxResult {
-	/** Connected BrowserdClient instance */
-	client: import("./client").BrowserdClient;
+export interface CreateSandboxResult extends SessionMethods {
 	/** Sandbox information */
 	sandbox: SandboxInfo;
 }

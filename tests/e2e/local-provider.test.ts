@@ -16,8 +16,10 @@ import {
 	test,
 } from "bun:test";
 import { spawnSync } from "node:child_process";
+import type { BrowserdClient } from "../../src/sdk/client";
 import { LocalSandboxProvider } from "../../src/sdk/providers/local";
 import { SandboxManager } from "../../src/sdk/sandbox-manager";
+import type { CreateSandboxResult } from "../../src/sdk/types";
 import { sleep } from "../helpers/setup";
 
 /**
@@ -88,7 +90,7 @@ describe("LocalSandboxProvider E2E", () => {
 				manager = new SandboxManager({ provider });
 
 				// Create sandbox
-				const { client, sandbox } = await manager.create();
+				const { sandbox, createSession, destroySession } = await manager.create();
 
 				expect(sandbox.id).toMatch(/^local-/);
 				expect(sandbox.status).toBe("ready");
@@ -99,16 +101,20 @@ describe("LocalSandboxProvider E2E", () => {
 				expect(sandbox.domain).toMatch(
 					/^http:\/\/browserd-.*\.orb\.local:3000$/,
 				);
-				expect(client.isConnected()).toBe(true);
 
 				// Verify we can reach the health endpoint
 				const healthResponse = await fetch(`${sandbox.domain}/readyz`);
 				expect(healthResponse.ok).toBe(true);
 
-				// Destroy sandbox
+				// Create a session - returns connected client directly
+				const session = await createSession();
+				expect(session.sessionId).toBeDefined();
+				expect(session.isConnected()).toBe(true);
+
+				// Destroy sandbox - close() destroys the session automatically
+				await session.close();
 				await manager.destroy(sandbox.id);
 				expect(manager.has(sandbox.id)).toBe(false);
-				expect(client.isConnected()).toBe(false);
 			},
 			{ timeout: 60000 }, // 3 minute timeout for potential image build
 		);
@@ -139,8 +145,6 @@ describe("LocalSandboxProvider E2E", () => {
 				// Both should be ready
 				expect(result1.sandbox.status).toBe("ready");
 				expect(result2.sandbox.status).toBe("ready");
-				expect(result1.client.isConnected()).toBe(true);
-				expect(result2.client.isConnected()).toBe(true);
 
 				// Verify both health endpoints
 				const [health1, health2] = await Promise.all([
@@ -160,7 +164,8 @@ describe("LocalSandboxProvider E2E", () => {
 
 	describe("Browser Operations", () => {
 		let manager: SandboxManager;
-		let client: Awaited<ReturnType<SandboxManager["create"]>>["client"];
+		let sandboxResult: CreateSandboxResult;
+		let client: BrowserdClient;
 
 		beforeAll(async () => {
 			if (!dockerAvailable) return;
@@ -171,11 +176,16 @@ describe("LocalSandboxProvider E2E", () => {
 			});
 
 			manager = new SandboxManager({ provider });
-			const result = await manager.create();
-			client = result.client;
+			sandboxResult = await manager.create();
+
+			// Create a session - returns connected client directly
+			client = await sandboxResult.createSession();
 		}, 60000);
 
 		afterAll(async () => {
+			if (client) {
+				await client.close().catch(() => {});
+			}
 			if (manager) {
 				await manager.destroyAll().catch(() => {});
 			}
@@ -279,9 +289,12 @@ describe("LocalSandboxProvider E2E", () => {
 				const manager = new SandboxManager({ provider });
 
 				try {
-					const { client, sandbox } = await manager.create();
+					const { sandbox, createSession } = await manager.create();
 
 					expect(sandbox.status).toBe("ready");
+
+					// Create session - returns connected client directly
+					const client = await createSession();
 					expect(client.isConnected()).toBe(true);
 
 					// Should work the same as headless
@@ -291,6 +304,8 @@ describe("LocalSandboxProvider E2E", () => {
 					);
 
 					expect(result).toBe("Headed Mode");
+
+					await client.close();
 				} finally {
 					// Cleanup inline - headed containers take longer to stop
 					await manager.destroyAll().catch(() => {});

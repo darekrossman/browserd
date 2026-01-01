@@ -100,3 +100,62 @@ Server sends:
 3. **Health Endpoints** - Kubernetes-compatible: `/livez` (always OK), `/readyz` (browser ready check), `/health` (full status).
 
 4. **Zero Production Dependencies** - The server runs with only Bun built-ins and dev dependencies.
+
+## Sprites.dev Integration
+
+Browserd can run on [sprites.dev](https://sprites.dev) cloud infrastructure using the `SpritesSandboxProvider`.
+
+### Sprite CLI Usage
+
+```bash
+# List sprites
+sprite list
+
+# Execute command on a sprite
+sprite -s <sprite-name> exec <command>
+
+# Execute shell commands (use bash -c for pipes/redirects)
+sprite -s sb1 exec bash -c "ps aux | grep browserd"
+
+# Manage services
+sprite -s sb1 exec sprite-env services list
+sprite -s sb1 exec sprite-env services delete <service-name>
+
+# Port forwarding (for WebSocket access)
+sprite proxy -s <sprite-name> <local-port>:<remote-port>
+```
+
+### Sprite Documentation
+
+When you need information about sprite CLI usage, services, checkpoints, or environment details, read the sprite's built-in documentation:
+
+```bash
+# Main entry point - lists available documentation
+sprite -s <sprite-name> exec cat /.sprite/llm.txt
+
+# Environment overview (services, checkpoints, network policy)
+sprite -s <sprite-name> exec cat /.sprite/docs/agent-context.md
+
+# Service management
+sprite -s <sprite-name> exec sprite-env --help
+sprite -s <sprite-name> exec sprite-env services --help
+```
+
+### Testing with Sprites
+
+```bash
+# Run the sprites provider test (requires SPRITE_TOKEN)
+SPRITE_TOKEN=<your-token> bun scripts/test-sprites-provider.ts <sprite-name>
+
+# Build and deploy bundle to sprite
+bun run bundle
+sprite -s sb1 exec sprite-env services delete browserd  # Stop existing service first
+# The test script auto-deploys the bundle
+```
+
+### Bundle Deployment
+
+When making changes to browserd server code:
+1. Rebuild the bundle: `bun run bundle`
+2. Delete the existing service: `sprite -s <name> exec sprite-env services delete browserd`
+3. Run the test or redeploy - the provider will upload the new bundle

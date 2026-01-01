@@ -61,7 +61,14 @@ export class BrowserdClient {
 	private baseUrl: string;
 	private options: BrowserdClientOptions;
 
-	constructor(options: BrowserdClientOptions) {
+	/** Session ID if this client is connected to a specific session */
+	public readonly sessionId?: string;
+	/** Session info if this client was created via createSession */
+	public readonly sessionInfo?: SessionInfo;
+
+	constructor(options: BrowserdClientOptions & { sessionId?: string; sessionInfo?: SessionInfo }) {
+		this.sessionId = options.sessionId;
+		this.sessionInfo = options.sessionInfo;
 		this.options = options;
 		this.defaultTimeout = options.timeout ?? 30000;
 		this.transport = options.transport ?? "ws";
@@ -131,13 +138,32 @@ export class BrowserdClient {
 	}
 
 	/**
-	 * Close the connection
+	 * Close the connection and destroy the session
+	 *
+	 * If this client is connected to a specific session (has sessionId),
+	 * this will also destroy the session on the server, freeing all resources.
 	 */
 	async close(): Promise<void> {
 		this.commands.cancelAll(
 			new BrowserdError("CONNECTION_CLOSED", "Client closed"),
 		);
 		await this.connection.close();
+
+		// Destroy the session on the server if we have a sessionId
+		if (this.sessionId) {
+			try {
+				await fetch(`${this.baseUrl}/api/sessions/${this.sessionId}`, {
+					method: "DELETE",
+					headers: {
+						...(this.options.authToken && {
+							Authorization: `Bearer ${this.options.authToken}`,
+						}),
+					},
+				});
+			} catch {
+				// Ignore errors - session may already be destroyed
+			}
+		}
 	}
 
 	/**
@@ -463,11 +489,12 @@ export class BrowserdClient {
 		// Handle WebSocket URLs
 		if (url.startsWith("ws://") || url.startsWith("wss://")) {
 			const httpUrl = url.replace(/^ws/, "http");
-			// Remove /ws path if present
-			return httpUrl.replace(/\/ws$/, "").replace(/\/sessions\/[^/]+\/ws$/, "");
+			// Remove session-specific paths first (longer pattern), then simple /ws
+			return httpUrl.replace(/\/sessions\/[^/]+\/ws$/, "").replace(/\/ws$/, "");
 		}
 		// Handle HTTP URLs (for SSE transport)
-		return url.replace(/\/stream$/, "").replace(/\/sessions\/[^/]+\/stream$/, "");
+		// Remove session-specific paths first (longer pattern), then simple /stream
+		return url.replace(/\/sessions\/[^/]+\/stream$/, "").replace(/\/stream$/, "");
 	}
 
 	// ============================================================================
@@ -563,7 +590,6 @@ export class BrowserdClient {
 	 * Destroy a session
 	 *
 	 * This closes the browser context and disconnects all clients.
-	 * The default session cannot be destroyed.
 	 */
 	async destroySession(sessionId: string): Promise<void> {
 		const response = await fetch(`${this.baseUrl}/api/sessions/${sessionId}`, {
@@ -578,9 +604,6 @@ export class BrowserdClient {
 		if (!response.ok) {
 			if (response.status === 404) {
 				throw new BrowserdError("SESSION_NOT_FOUND", `Session ${sessionId} not found`);
-			}
-			if (response.status === 403) {
-				throw new BrowserdError("SESSION_ERROR", "Cannot destroy default session");
 			}
 			throw new BrowserdError(
 				"SESSION_ERROR",

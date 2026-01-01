@@ -12,7 +12,11 @@ import type {
 	BrowserdClientOptions,
 	CreateSandboxOptions,
 	CreateSandboxResult,
+	CreateSessionOptions,
+	ListSessionsResponse,
 	SandboxInfo,
+	SessionInfo,
+	TransportType,
 } from "./types";
 
 export interface SandboxManagerOptions {
@@ -23,16 +27,26 @@ export interface SandboxManagerOptions {
 }
 
 /**
- * Manages sandbox lifecycle and client connections
+ * Internal state for a managed sandbox
+ */
+interface ManagedSandbox {
+	sandbox: SandboxInfo;
+	baseUrl: string;
+	transport: TransportType;
+	/** Connected clients per session */
+	clients: Map<string, BrowserdClient>;
+}
+
+/**
+ * Manages sandbox lifecycle and session management
  *
  * This is the main entry point for provisioning new sandboxes with browserd.
- * It abstracts the provider-specific logic and handles client lifecycle.
+ * It abstracts the provider-specific logic and provides session management.
  */
 export class SandboxManager {
 	private provider: SandboxProvider;
 	private clientOptions: Partial<Omit<BrowserdClientOptions, "url">>;
-	private sandboxes = new Map<string, SandboxInfo>();
-	private clients = new Map<string, BrowserdClient>();
+	private sandboxes = new Map<string, ManagedSandbox>();
 
 	constructor(options: SandboxManagerOptions) {
 		this.provider = options.provider;
@@ -47,70 +61,267 @@ export class SandboxManager {
 	}
 
 	/**
-	 * Create a new sandbox with browserd and connect a client
+	 * Create a new sandbox with browserd
+	 *
+	 * Returns session management methods for creating and managing browser sessions.
 	 *
 	 * @param options - Sandbox creation options
-	 * @returns Connected client and sandbox information
+	 * @returns Session management methods and sandbox information
+	 *
+	 * @example
+	 * ```typescript
+	 * const { sandbox, createSession, getSessionClient } = await manager.create();
+	 *
+	 * // Create a browser session
+	 * const session = await createSession({ viewport: { width: 1920, height: 1080 } });
+	 *
+	 * // Get a connected client for that session
+	 * const browser = await getSessionClient(session.id);
+	 * await browser.connect();
+	 *
+	 * // Use the browser
+	 * await browser.navigate("https://example.com");
+	 * ```
 	 */
 	async create(options?: CreateSandboxOptions): Promise<CreateSandboxResult> {
 		// Create the sandbox via provider
 		const sandbox = await this.provider.create(options);
 
-		// Track the sandbox
-		this.sandboxes.set(sandbox.id, sandbox);
-
-		// Determine the connection URL based on transport
-		// - For WebSocket: use wsUrl
-		// - For SSE: use streamUrl if available, otherwise derive from wsUrl
+		// Determine the base URL for API calls
 		const transport = sandbox.transport ?? "ws";
-		let connectionUrl: string;
-		if (transport === "sse" && sandbox.streamUrl) {
-			connectionUrl = sandbox.streamUrl;
+
+		// Extract base URL from wsUrl or streamUrl
+		let baseUrl: string;
+		if (sandbox.streamUrl) {
+			// Remove /stream suffix if present
+			baseUrl = sandbox.streamUrl.replace(/\/stream$/, "");
 		} else {
-			connectionUrl = sandbox.wsUrl;
+			// Convert ws:// to http:// and remove /ws suffix
+			baseUrl = sandbox.wsUrl
+				.replace(/^ws:/, "http:")
+				.replace(/^wss:/, "https:")
+				.replace(/\/ws$/, "");
 		}
 
-		// Create and connect client with appropriate transport
-		const client = new BrowserdClient({
-			url: connectionUrl,
-			transport,
-			authToken: sandbox.authToken,
-			...this.clientOptions,
-		});
+		// Track the sandbox
+		this.sandboxes.set(sandbox.id, { sandbox, baseUrl, transport, clients: new Map() });
 
-		try {
-			await client.connect();
-		} catch (err) {
-			// Cleanup sandbox on connection failure
-			await this.provider.destroy(sandbox.id).catch(() => {});
-			this.sandboxes.delete(sandbox.id);
+		// Create bound session management methods
+		const createSession = (sessionOptions?: CreateSessionOptions) =>
+			this.createSession(sandbox.id, sessionOptions);
+		const listSessions = () => this.listSessions(sandbox.id);
+		const getSession = (sessionId: string) => this.getSession(sandbox.id, sessionId);
+		const getSessionInfo = (sessionId: string) => this.getSessionInfo(sandbox.id, sessionId);
+		const destroySession = (sessionId: string) => this.destroySession(sandbox.id, sessionId);
 
-			throw BrowserdError.connectionFailed(
-				`Failed to connect to sandbox ${sandbox.id}: ${err instanceof Error ? err.message : String(err)}`,
-				err instanceof Error ? err : undefined,
-			);
-		}
-
-		// Track the client
-		this.clients.set(sandbox.id, client);
-
-		return { client, sandbox };
+		return {
+			sandbox,
+			createSession,
+			listSessions,
+			getSession,
+			getSessionInfo,
+			destroySession,
+		};
 	}
 
 	/**
-	 * Destroy a sandbox and close its client
+	 * Create a new browser session on a sandbox and return a connected client
+	 */
+	private async createSession(
+		sandboxId: string,
+		options?: CreateSessionOptions,
+	): Promise<BrowserdClient> {
+		const managed = this.sandboxes.get(sandboxId);
+		if (!managed) {
+			throw new BrowserdError("SANDBOX_NOT_FOUND", `Sandbox ${sandboxId} not found`);
+		}
+
+		const response = await fetch(`${managed.baseUrl}/api/sessions`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				...(managed.sandbox.authToken && {
+					Authorization: `Bearer ${managed.sandbox.authToken}`,
+				}),
+			},
+			body: JSON.stringify(options ?? {}),
+		});
+
+		if (!response.ok) {
+			const error = await response.json().catch(() => ({ error: "Unknown error" }));
+			throw new BrowserdError(
+				"SESSION_ERROR",
+				error.error || `Failed to create session: ${response.status}`,
+			);
+		}
+
+		const sessionInfo: SessionInfo = await response.json();
+
+		// Create and connect client
+		const sessionUrl = managed.transport === "sse" ? sessionInfo.streamUrl : sessionInfo.wsUrl;
+		const client = new BrowserdClient({
+			url: sessionUrl,
+			transport: managed.transport,
+			authToken: managed.sandbox.authToken,
+			sessionId: sessionInfo.id,
+			sessionInfo,
+			...this.clientOptions,
+		});
+
+		await client.connect();
+
+		// Cache the connected client
+		managed.clients.set(sessionInfo.id, client);
+
+		return client;
+	}
+
+	/**
+	 * List all sessions on a sandbox
+	 */
+	private async listSessions(sandboxId: string): Promise<ListSessionsResponse> {
+		const managed = this.sandboxes.get(sandboxId);
+		if (!managed) {
+			throw new BrowserdError("SANDBOX_NOT_FOUND", `Sandbox ${sandboxId} not found`);
+		}
+
+		const response = await fetch(`${managed.baseUrl}/api/sessions`, {
+			headers: {
+				...(managed.sandbox.authToken && {
+					Authorization: `Bearer ${managed.sandbox.authToken}`,
+				}),
+			},
+		});
+
+		if (!response.ok) {
+			throw new BrowserdError(
+				"SESSION_ERROR",
+				`Failed to list sessions: ${response.status}`,
+			);
+		}
+
+		return response.json();
+	}
+
+	/**
+	 * Get a connected client for a session (cached or creates new connection)
+	 */
+	private async getSession(sandboxId: string, sessionId: string): Promise<BrowserdClient> {
+		const managed = this.sandboxes.get(sandboxId);
+		if (!managed) {
+			throw new BrowserdError("SANDBOX_NOT_FOUND", `Sandbox ${sandboxId} not found`);
+		}
+
+		// Return cached client if available and connected
+		const cached = managed.clients.get(sessionId);
+		if (cached?.isConnected()) {
+			return cached;
+		}
+
+		// Get session info and create new connected client
+		const sessionInfo = await this.getSessionInfo(sandboxId, sessionId);
+
+		const sessionUrl = managed.transport === "sse" ? sessionInfo.streamUrl : sessionInfo.wsUrl;
+		const client = new BrowserdClient({
+			url: sessionUrl,
+			transport: managed.transport,
+			authToken: managed.sandbox.authToken,
+			sessionId: sessionInfo.id,
+			sessionInfo,
+			...this.clientOptions,
+		});
+
+		await client.connect();
+
+		// Cache the connected client
+		managed.clients.set(sessionId, client);
+
+		return client;
+	}
+
+	/**
+	 * Get information about a specific session without connecting
+	 */
+	private async getSessionInfo(sandboxId: string, sessionId: string): Promise<SessionInfo> {
+		const managed = this.sandboxes.get(sandboxId);
+		if (!managed) {
+			throw new BrowserdError("SANDBOX_NOT_FOUND", `Sandbox ${sandboxId} not found`);
+		}
+
+		const response = await fetch(`${managed.baseUrl}/api/sessions/${sessionId}`, {
+			headers: {
+				...(managed.sandbox.authToken && {
+					Authorization: `Bearer ${managed.sandbox.authToken}`,
+				}),
+			},
+		});
+
+		if (!response.ok) {
+			if (response.status === 404) {
+				throw new BrowserdError("SESSION_NOT_FOUND", `Session ${sessionId} not found`);
+			}
+			throw new BrowserdError(
+				"SESSION_ERROR",
+				`Failed to get session: ${response.status}`,
+			);
+		}
+
+		return response.json();
+	}
+
+	/**
+	 * Destroy a session on a sandbox
+	 *
+	 * Note: If you have a client reference, calling `client.close()` is preferred
+	 * as it handles both disconnection and session destruction.
+	 * This method is useful when you need to destroy a session without a client reference.
+	 */
+	private async destroySession(sandboxId: string, sessionId: string): Promise<void> {
+		const managed = this.sandboxes.get(sandboxId);
+		if (!managed) {
+			throw new BrowserdError("SANDBOX_NOT_FOUND", `Sandbox ${sandboxId} not found`);
+		}
+
+		// Remove from cache (don't call close() to avoid double API call)
+		managed.clients.delete(sessionId);
+
+		const response = await fetch(`${managed.baseUrl}/api/sessions/${sessionId}`, {
+			method: "DELETE",
+			headers: {
+				...(managed.sandbox.authToken && {
+					Authorization: `Bearer ${managed.sandbox.authToken}`,
+				}),
+			},
+		});
+
+		if (!response.ok) {
+			if (response.status === 404) {
+				// Session already destroyed (likely via client.close())
+				return;
+			}
+			throw new BrowserdError(
+				"SESSION_ERROR",
+				`Failed to destroy session: ${response.status}`,
+			);
+		}
+	}
+
+	/**
+	 * Destroy a sandbox
 	 *
 	 * @param sandboxId - ID of the sandbox to destroy
 	 */
 	async destroy(sandboxId: string): Promise<void> {
-		// Close the client first
-		const client = this.clients.get(sandboxId);
-		if (client) {
-			await client.close().catch(() => {});
-			this.clients.delete(sandboxId);
+		const managed = this.sandboxes.get(sandboxId);
+		if (managed) {
+			// Close all cached session clients
+			for (const client of managed.clients.values()) {
+				await client.close().catch(() => {});
+			}
+			managed.clients.clear();
 		}
 
-		// Destroy the sandbox
+		// Destroy the sandbox via provider
 		await this.provider.destroy(sandboxId);
 		this.sandboxes.delete(sandboxId);
 	}
@@ -130,17 +341,7 @@ export class SandboxManager {
 	 * @returns Sandbox information or undefined if not found
 	 */
 	get(sandboxId: string): SandboxInfo | undefined {
-		return this.sandboxes.get(sandboxId);
-	}
-
-	/**
-	 * Get the client for a sandbox
-	 *
-	 * @param sandboxId - ID of the sandbox
-	 * @returns BrowserdClient or undefined if not found
-	 */
-	getClient(sandboxId: string): BrowserdClient | undefined {
-		return this.clients.get(sandboxId);
+		return this.sandboxes.get(sandboxId)?.sandbox;
 	}
 
 	/**
@@ -149,7 +350,7 @@ export class SandboxManager {
 	 * @returns Array of sandbox information
 	 */
 	list(): SandboxInfo[] {
-		return Array.from(this.sandboxes.values());
+		return Array.from(this.sandboxes.values()).map((m) => m.sandbox);
 	}
 
 	/**

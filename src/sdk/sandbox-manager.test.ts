@@ -27,13 +27,20 @@ describe("SandboxManager", () => {
 	});
 
 	describe("create", () => {
-		it("should create sandbox and connect client", async () => {
-			const { client, sandbox } = await manager.create();
+		it("should create sandbox and return session methods", async () => {
+			const { sandbox, createSession, listSessions, getSession, getSessionInfo, destroySession } =
+				await manager.create();
 
 			expect(sandbox.id).toMatch(/^mock_sandbox_\d+$/);
 			expect(sandbox.status).toBe("ready");
 			expect(sandbox.wsUrl).toMatch(/^ws:\/\/localhost:\d+\/ws$/);
-			expect(client.isConnected()).toBe(true);
+
+			// Verify session methods are functions
+			expect(typeof createSession).toBe("function");
+			expect(typeof listSessions).toBe("function");
+			expect(typeof getSession).toBe("function");
+			expect(typeof getSessionInfo).toBe("function");
+			expect(typeof destroySession).toBe("function");
 		});
 
 		it("should track created sandbox", async () => {
@@ -49,13 +56,6 @@ describe("SandboxManager", () => {
 			const info = manager.get(sandbox.id);
 			expect(info).toBeDefined();
 			expect(info?.id).toBe(sandbox.id);
-		});
-
-		it("should return client via getClient()", async () => {
-			const { client, sandbox } = await manager.create();
-
-			const retrieved = manager.getClient(sandbox.id);
-			expect(retrieved).toBe(client);
 		});
 
 		it("should handle provider errors", async () => {
@@ -79,14 +79,13 @@ describe("SandboxManager", () => {
 	});
 
 	describe("destroy", () => {
-		it("should destroy sandbox and close client", async () => {
-			const { client, sandbox } = await manager.create();
+		it("should destroy sandbox", async () => {
+			const { sandbox } = await manager.create();
 
 			await manager.destroy(sandbox.id);
 
 			expect(manager.has(sandbox.id)).toBe(false);
 			expect(manager.size).toBe(0);
-			expect(client.isConnected()).toBe(false);
 		});
 
 		it("should handle destroying non-existent sandbox", async () => {
@@ -123,17 +122,6 @@ describe("SandboxManager", () => {
 
 		it("should return empty array when no sandboxes", () => {
 			expect(manager.list()).toEqual([]);
-		});
-	});
-
-	describe("client operations", () => {
-		it("should allow using client for browser operations", async () => {
-			const { client } = await manager.create();
-
-			// These should resolve without error (mock server returns success)
-			await expect(
-				client.navigate("https://example.com"),
-			).resolves.toBeDefined();
 		});
 	});
 });

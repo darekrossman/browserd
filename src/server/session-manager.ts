@@ -105,8 +105,6 @@ export interface SessionInfo {
 	url: string;
 }
 
-// Default session ID for backward compatibility
-const DEFAULT_SESSION_ID = "default";
 
 // Chromium launch arguments
 const CHROMIUM_ARGS = [
@@ -303,141 +301,6 @@ export class SessionManager {
 		return session;
 	}
 
-	/**
-	 * Get or create the default session (for backward compatibility)
-	 */
-	async getOrCreateDefault(): Promise<BrowserSession> {
-		let session = this.sessions.get(DEFAULT_SESSION_ID);
-		if (!session) {
-			// Create default session with explicit ID
-			session = await this.createSessionWithId(DEFAULT_SESSION_ID);
-		}
-		return session;
-	}
-
-	/**
-	 * Create a session with a specific ID (used for default session)
-	 */
-	private async createSessionWithId(
-		sessionId: string,
-		options: CreateSessionOptions = {},
-	): Promise<BrowserSession> {
-		if (!this.browser) {
-			throw new Error("SessionManager not initialized. Call initialize() first.");
-		}
-
-		const profileName = (options.profile ?? "chrome-mac") as ProfileName;
-		const profile = getProfile(profileName);
-		const viewport = options.viewport ?? this.config.defaultViewport;
-		const stealthConfig = this.config.stealth;
-
-		console.log(`[session-manager] Creating session ${sessionId}...`);
-
-		// Create isolated browser context with stealth settings
-		const context = await this.browser.newContext({
-			viewport,
-			userAgent: options.userAgent ?? profile.userAgent,
-			locale: stealthConfig.enabled ? profile.locale : undefined,
-			timezoneId: stealthConfig.enabled ? profile.timezone : undefined,
-			deviceScaleFactor: stealthConfig.enabled ? profile.deviceScaleFactor : undefined,
-		});
-
-		// Apply stealth scripts
-		if (stealthConfig.enabled) {
-			const stealthScript = generateStealthScript(profile, stealthConfig.fingerprint);
-			await context.addInitScript(stealthScript);
-			await context.addInitScript(MAIN_CONTEXT_BRIDGE_SCRIPT);
-
-			// Block bot detection scripts
-			if (stealthConfig.blockBotDetection) {
-				for (const pattern of BOT_DETECTION_DOMAINS) {
-					await context.route(pattern, (route) => route.abort("blockedbyclient"));
-				}
-			}
-
-			// Set realistic HTTP headers
-			await context.setExtraHTTPHeaders({
-				Accept:
-					"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-				"Accept-Encoding": "gzip, deflate, br",
-				"Accept-Language": "en-US,en;q=0.9",
-				"Sec-CH-UA":
-					'"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-				"Sec-CH-UA-Mobile": "?0",
-				"Sec-CH-UA-Platform": `"${profile.platform.includes("Mac") ? "macOS" : profile.platform.includes("Win") ? "Windows" : "Linux"}"`,
-				"Sec-Fetch-Dest": "document",
-				"Sec-Fetch-Mode": "navigate",
-				"Sec-Fetch-Site": "none",
-				"Sec-Fetch-User": "?1",
-				"Upgrade-Insecure-Requests": "1",
-			});
-		}
-
-		// Create page
-		const page = await context.newPage();
-
-		// Create CDP session for screencast - use the provided sessionId directly
-		const cdpSession = new CDPSessionManager(page, {
-			screencast: {
-				format: "jpeg",
-				quality: 60,
-				maxWidth: viewport.width,
-				maxHeight: viewport.height,
-			},
-			sessionId,
-			onFrame: (frame) => {
-				const session = this.sessions.get(sessionId);
-				if (session) {
-					session.frameBuffer = frame;
-					session.lastActivity = Date.now();
-					this.onSessionFrame?.(sessionId, frame);
-				}
-			},
-			onEvent: (event) => {
-				this.onSessionEvent?.(sessionId, event);
-			},
-		});
-
-		// Create command queue for this session
-		const commandQueue = new CommandQueue({
-			page,
-			timeout: 30000,
-			sessionId,
-			timingMode: options.timingMode ?? "none",
-		});
-
-		const now = Date.now();
-		const session: BrowserSession = {
-			id: sessionId,
-			context,
-			page,
-			cdpSession,
-			commandQueue,
-			clients: new Set(),
-			profile,
-			viewport,
-			createdAt: now,
-			lastActivity: now,
-			frameBuffer: null,
-			status: "creating",
-		};
-
-		this.sessions.set(sessionId, session);
-
-		// Initialize CDP and start screencast
-		await cdpSession.init();
-		await cdpSession.startScreencast();
-
-		// Navigate to initial URL if provided
-		if (options.initialUrl) {
-			await page.goto(options.initialUrl, { waitUntil: "domcontentloaded" });
-		}
-
-		session.status = "ready";
-		console.log(`[session-manager] Session ${sessionId} ready`);
-
-		return session;
-	}
 
 	/**
 	 * Get a session by ID
@@ -614,9 +477,6 @@ export class SessionManager {
 		const toDestroy: string[] = [];
 
 		for (const [sessionId, session] of this.sessions) {
-			// Skip default session
-			if (sessionId === DEFAULT_SESSION_ID) continue;
-
 			// Check lifetime
 			const lifetime = now - session.createdAt;
 			if (lifetime > this.config.sessionMaxLifetime) {
@@ -653,9 +513,6 @@ export class SessionManager {
 		const idleSessions: Array<{ id: string; idleTime: number }> = [];
 
 		for (const [sessionId, session] of this.sessions) {
-			// Skip default session
-			if (sessionId === DEFAULT_SESSION_ID) continue;
-
 			// Only consider sessions with no clients
 			if (session.clients.size === 0) {
 				idleSessions.push({

@@ -41,12 +41,15 @@ interface EvaluateResult {
 const runTests = hasBrowserSupport();
 const TEST_PORT = 3000;
 const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
-const WS_URL = `ws://127.0.0.1:${TEST_PORT}/ws`;
 
 describe("E2E Full Flow", () => {
 	let server: ReturnType<typeof Bun.serve> | null = null;
 	let sessionManager: SessionManager | null = null;
 	let wsHandler: MultiSessionWSHandler | null = null;
+	let testSessionId: string | null = null;
+
+	// Dynamic WS URL based on session
+	const getWsUrl = () => `ws://127.0.0.1:${TEST_PORT}/sessions/${testSessionId}/ws`;
 
 	beforeAll(async () => {
 		if (!runTests) return;
@@ -55,8 +58,9 @@ describe("E2E Full Flow", () => {
 		sessionManager = createSessionManager();
 		await sessionManager.initialize();
 
-		// Create default session
-		const defaultSession = await sessionManager.getOrCreateDefault();
+		// Create a test session
+		const testSession = await sessionManager.createSession();
+		testSessionId = testSession.id;
 
 		// Create WS handler with session manager
 		wsHandler = new MultiSessionWSHandler({
@@ -75,10 +79,15 @@ describe("E2E Full Flow", () => {
 				const url = new URL(req.url);
 				const path = url.pathname;
 
-				// WebSocket upgrade
-				if (path === "/ws") {
+				// Session-specific WebSocket: /sessions/{id}/ws
+				const sessionWsMatch = path.match(/^\/sessions\/([^/]+)\/ws$/);
+				if (sessionWsMatch) {
+					const sessionId = sessionWsMatch[1];
+					if (!sessionManager?.hasSession(sessionId)) {
+						return new Response("Session not found", { status: 404 });
+					}
 					const upgraded = server.upgrade(req, {
-						data: createWebSocketData("default"),
+						data: createWebSocketData(sessionId),
 					});
 					return upgraded
 						? undefined
@@ -129,7 +138,7 @@ describe("E2E Full Flow", () => {
 
 	describe("Test 1: Basic viewing flow", () => {
 		test.skipIf(!runTests)("connects and receives frames", async () => {
-			const client = new TestWSClient({ url: WS_URL, timeout: 10000 });
+			const client = new TestWSClient({ url: getWsUrl(), timeout: 10000 });
 
 			await client.connect();
 			expect(client.isConnected()).toBe(true);
@@ -158,7 +167,7 @@ describe("E2E Full Flow", () => {
 		});
 
 		test.skipIf(!runTests)("handles ping/pong", async () => {
-			const client = new TestWSClient({ url: WS_URL });
+			const client = new TestWSClient({ url: getWsUrl() });
 
 			await client.connect();
 
@@ -177,7 +186,7 @@ describe("E2E Full Flow", () => {
 		});
 
 		test.skipIf(!runTests)("disconnects cleanly", async () => {
-			const client = new TestWSClient({ url: WS_URL });
+			const client = new TestWSClient({ url: getWsUrl() });
 
 			await client.connect();
 			expect(client.isConnected()).toBe(true);
@@ -189,7 +198,7 @@ describe("E2E Full Flow", () => {
 
 	describe("Test 2: Input control flow", () => {
 		test.skipIf(!runTests)("processes mouse input", async () => {
-			const client = new TestWSClient({ url: WS_URL });
+			const client = new TestWSClient({ url: getWsUrl() });
 
 			await client.connect();
 
@@ -228,7 +237,7 @@ describe("E2E Full Flow", () => {
 		});
 
 		test.skipIf(!runTests)("processes keyboard input", async () => {
-			const client = new TestWSClient({ url: WS_URL });
+			const client = new TestWSClient({ url: getWsUrl() });
 
 			await client.connect();
 
@@ -269,7 +278,7 @@ describe("E2E Full Flow", () => {
 
 	describe("Test 3: RPC command flow", () => {
 		test.skipIf(!runTests)("executes navigate command", async () => {
-			const client = new TestWSClient({ url: WS_URL });
+			const client = new TestWSClient({ url: getWsUrl() });
 
 			await client.connect();
 
@@ -285,7 +294,7 @@ describe("E2E Full Flow", () => {
 		});
 
 		test.skipIf(!runTests)("executes click command", async () => {
-			const client = new TestWSClient({ url: WS_URL });
+			const client = new TestWSClient({ url: getWsUrl() });
 
 			await client.connect();
 
@@ -327,7 +336,7 @@ describe("E2E Full Flow", () => {
 		});
 
 		test.skipIf(!runTests)("executes type command", async () => {
-			const client = new TestWSClient({ url: WS_URL });
+			const client = new TestWSClient({ url: getWsUrl() });
 
 			await client.connect();
 
@@ -361,7 +370,7 @@ describe("E2E Full Flow", () => {
 
 	describe("Test 4: Full interaction sequence", () => {
 		test.skipIf(!runTests)("completes form submission flow", async () => {
-			const client = new TestWSClient({ url: WS_URL });
+			const client = new TestWSClient({ url: getWsUrl() });
 
 			await client.connect();
 
@@ -426,7 +435,7 @@ describe("E2E Full Flow", () => {
 		});
 
 		test.skipIf(!runTests)("handles navigation history", async () => {
-			const client = new TestWSClient({ url: WS_URL });
+			const client = new TestWSClient({ url: getWsUrl() });
 
 			await client.connect();
 
@@ -480,7 +489,7 @@ describe("E2E Full Flow", () => {
 
 	describe("Test 5: Error handling", () => {
 		test.skipIf(!runTests)("returns error for invalid command", async () => {
-			const client = new TestWSClient({ url: WS_URL });
+			const client = new TestWSClient({ url: getWsUrl() });
 
 			await client.connect();
 
@@ -496,7 +505,7 @@ describe("E2E Full Flow", () => {
 		});
 
 		test.skipIf(!runTests)("returns error for missing selector", async () => {
-			const client = new TestWSClient({ url: WS_URL });
+			const client = new TestWSClient({ url: getWsUrl() });
 
 			await client.connect();
 
@@ -521,7 +530,7 @@ describe("E2E Full Flow", () => {
 		});
 
 		test.skipIf(!runTests)("returns error for invalid navigation", async () => {
-			const client = new TestWSClient({ url: WS_URL });
+			const client = new TestWSClient({ url: getWsUrl() });
 
 			await client.connect();
 

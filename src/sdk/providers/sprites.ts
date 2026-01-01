@@ -617,15 +617,21 @@ export class SpritesSandboxProvider implements SandboxProvider {
 	 * Stop the browserd service on a sprite
 	 */
 	private async stopBrowserdService(sprite: SpriteWithUrl): Promise<void> {
-		// Delete the service via API
+		// Delete the service via API (browserd will cleanup Xvfb and Chromium on SIGTERM)
 		await this.exec(
 			sprite,
 			"sprite-env curl -X DELETE /v1/services/browserd 2>/dev/null || true",
 		).catch(() => {});
-		// Kill any orphaned browserd processes
-		await this.exec(sprite, "pkill -f browserd.js 2>/dev/null || true").catch(
-			() => {},
-		);
+
+		// Give browserd time to cleanup child processes
+		await sleep(1000);
+
+		// Safety net: kill any orphaned processes that may have escaped cleanup
+		await this.exec(
+			sprite,
+			"pkill -9 -f 'browserd.js|Xvfb|chromium.*playwright' 2>/dev/null || true",
+		).catch(() => {});
+
 		// Give processes time to exit
 		await sleep(500);
 	}
@@ -756,22 +762,14 @@ export class SpritesSandboxProvider implements SandboxProvider {
 		this.log("Starting browserd service...");
 
 		// Create browserd service using sprite-env curl (avoids jq dependency)
-		const serviceJson = this.headed
-			? JSON.stringify({
-					cmd: "bash",
-					args: [
-						"-c",
-						"Xvfb :99 -screen 0 1200x900x24 &>/dev/null & sleep 0.5 && DISPLAY=:99 bun /home/sprite/browserd.js",
-					],
-					http_port: 3000,
-					env: { HEADLESS: "false" },
-				})
-			: JSON.stringify({
-					cmd: "bun",
-					args: ["/home/sprite/browserd.js"],
-					http_port: 3000,
-					env: { HEADLESS: "true" },
-				});
+		// Note: browserd now manages Xvfb internally when HEADLESS=false
+		// We use bash -c with inline env var because the service `env` object isn't reliably applied
+		const headlessValue = this.headed ? "false" : "true";
+		const serviceJson = JSON.stringify({
+			cmd: "bash",
+			args: ["-c", `HEADLESS=${headlessValue} bun /home/sprite/browserd.js`],
+			http_port: 3000,
+		});
 
 		const result = await this.exec(
 			sprite,

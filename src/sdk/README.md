@@ -6,6 +6,10 @@ A TypeScript SDK for browser automation with visual streaming and remote control
 
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+  - [createClient (Recommended)](#createclient-recommended)
+  - [Using SandboxManager](#using-sandboxmanager)
+  - [Direct Connection](#direct-connection)
+- [Session Management](#session-management)
 - [Providers](#providers)
   - [LocalSandboxProvider](#localsandboxprovider)
   - [VercelSandboxProvider](#vercelsandboxprovider)
@@ -47,15 +51,93 @@ bun add @fly/sprites
 
 ## Quick Start
 
+### createClient (Recommended)
+
+The simplest way to get started with a managed sandbox:
+
+```typescript
+import { createClient, SpritesSandboxProvider } from "browserd";
+
+// Create sandbox with session management methods
+const { sandbox, manager, createSession, destroySession } = await createClient({
+  provider: new SpritesSandboxProvider({ token: process.env.SPRITE_TOKEN }),
+});
+
+// Create a browser session - returns connected client ready to use
+const browser = await createSession();
+
+// Use the browser immediately
+await browser.navigate("https://example.com");
+await browser.fill("input[name=email]", "user@example.com");
+await browser.screenshot({ fullPage: true });
+
+// Cleanup - close() disconnects AND destroys the session
+await browser.close();
+await manager.destroy(sandbox.id);
+```
+
+With local Docker:
+
+```typescript
+import { createClient, LocalSandboxProvider } from "browserd";
+
+const { sandbox, manager, createSession } = await createClient({
+  provider: new LocalSandboxProvider(),
+});
+
+// Create session - returns connected client
+const browser = await createSession();
+
+// Use the browser immediately
+await browser.navigate("https://example.com");
+
+// Cleanup - close() handles everything
+await browser.close();
+await manager.destroy(sandbox.id);
+```
+
+### Using SandboxManager
+
+For more control over sandbox lifecycle:
+
+```typescript
+import { SandboxManager, LocalSandboxProvider } from "browserd";
+
+const provider = new LocalSandboxProvider();
+const manager = new SandboxManager({ provider });
+
+// Create sandbox - returns session management methods
+const { sandbox, createSession, listSessions } = await manager.create();
+
+// Create a browser session - returns connected client
+const browser = await createSession({
+  viewport: { width: 1920, height: 1080 }
+});
+
+// Use the browser immediately
+await browser.navigate("https://example.com");
+await browser.fill("input[name=email]", "user@example.com");
+await browser.screenshot({ fullPage: true });
+
+// List all sessions on this sandbox
+const sessions = await listSessions();
+console.log("Active sessions:", sessions.sessions.length);
+
+// Cleanup - close() destroys the session automatically
+await browser.close();
+await manager.destroy(sandbox.id);
+```
+
 ### Direct Connection
 
-Connect directly to a running browserd server:
+Connect directly to an existing session on a running browserd server:
 
 ```typescript
 import { BrowserdClient } from "browserd";
 
+// Connect to a specific session (session must be created via API first)
 const client = new BrowserdClient({
-  url: "ws://localhost:3000/ws",
+  url: "ws://localhost:3000/sessions/my-session-id/ws",
 });
 
 await client.connect();
@@ -64,24 +146,89 @@ await client.click("button#submit");
 await client.close();
 ```
 
-### Using SandboxManager
+---
 
-Provision and manage browser sandboxes automatically:
+## Session Management
+
+Sessions provide isolated browser contexts with independent cookies, storage, and state. Each session runs in its own browser context, allowing multiple independent browser sessions on a single sandbox.
+
+### Creating Sessions
 
 ```typescript
-import { SandboxManager } from "browserd";
-import { LocalSandboxProvider } from "browserd/providers";
+const { sandbox, createSession, listSessions, getSession, getSessionInfo, destroySession } = await manager.create();
 
-const provider = new LocalSandboxProvider();
-const manager = new SandboxManager({ provider });
+// Create session - returns connected client ready to use
+const browser1 = await createSession();
 
-const { client, sandbox } = await manager.create();
+// Create session with custom viewport
+const browser2 = await createSession({
+  viewport: { width: 1920, height: 1080 }
+});
 
-await client.navigate("https://example.com");
-await client.fill("input[name=email]", "user@example.com");
-await client.screenshot({ fullPage: true });
+// Create session with custom profile
+const browser3 = await createSession({
+  profile: { locale: "en-US", timezone: "America/New_York" }
+});
 
-await manager.destroy(sandbox.id);
+// Access session info from the client
+console.log("Session ID:", browser1.sessionId);
+console.log("Viewer URL:", browser1.sessionInfo?.viewerUrl);
+```
+
+### Session Lifecycle
+
+```typescript
+// List all sessions
+const { sessions } = await listSessions();
+console.log("Sessions:", sessions.map(s => s.id));
+
+// Get info about a specific session (without connecting)
+const sessionInfo = await getSessionInfo(browser1.sessionId!);
+console.log("Status:", sessionInfo.status);
+
+// Get an existing session's client (returns cached or creates new connection)
+const existingBrowser = await getSession(browser1.sessionId!);
+
+// Use the browser...
+await existingBrowser.navigate("https://example.com");
+
+// Clean up - close() disconnects AND destroys the session
+await existingBrowser.close();
+```
+
+### Session URLs
+
+Each session exposes its own endpoints:
+
+| Endpoint | Description |
+|----------|-------------|
+| `/sessions/{id}/ws` | WebSocket connection for real-time control |
+| `/sessions/{id}/stream` | SSE stream for HTTP-only environments |
+| `/sessions/{id}/input` | HTTP POST endpoint for commands (SSE mode) |
+| `/sessions/{id}/viewer` | Browser viewer page |
+
+### Multiple Sessions
+
+Run multiple isolated browser sessions on a single sandbox:
+
+```typescript
+const { createSession } = await manager.create();
+
+// Create two independent sessions - both return connected clients
+const browser1 = await createSession();
+const browser2 = await createSession();
+
+// Each session has isolated state - use immediately
+await browser1.navigate("https://site-a.com");
+await browser2.navigate("https://site-b.com");
+
+// Log into different accounts
+await browser1.fill("input[name=email]", "user1@example.com");
+await browser2.fill("input[name=email]", "user2@example.com");
+
+// Clean up - each close() destroys its session
+await browser1.close();
+await browser2.close();
 ```
 
 ---
@@ -97,8 +244,7 @@ Run browserd in local Docker containers. Best for development and testing.
 **Requirements:** Docker with OrbStack (for `.orb.local` DNS)
 
 ```typescript
-import { SandboxManager } from "browserd";
-import { LocalSandboxProvider } from "browserd/providers";
+import { SandboxManager, LocalSandboxProvider } from "browserd";
 
 const provider = new LocalSandboxProvider({
   headed: true,           // Run with Xvfb (default: true)
@@ -110,7 +256,10 @@ const provider = new LocalSandboxProvider({
 });
 
 const manager = new SandboxManager({ provider });
-const { client, sandbox } = await manager.create();
+const { sandbox, createSession } = await manager.create();
+
+// Create a session - returns connected client
+const browser = await createSession();
 ```
 
 **Options:**
@@ -134,8 +283,7 @@ Deploy browserd on Vercel's managed sandbox infrastructure.
 **Requirements:** `@vercel/sandbox` package, blob storage with deployment artifacts
 
 ```typescript
-import { SandboxManager } from "browserd";
-import { VercelSandboxProvider } from "browserd/providers";
+import { SandboxManager, VercelSandboxProvider } from "browserd";
 
 const provider = new VercelSandboxProvider({
   blobBaseUrl: "https://blob.vercel-storage.com/browserd",
@@ -143,7 +291,9 @@ const provider = new VercelSandboxProvider({
 });
 
 const manager = new SandboxManager({ provider });
-const { client, sandbox } = await manager.create();
+const { sandbox, createSession } = await manager.create();
+
+const browser = await createSession();
 ```
 
 **Options:**
@@ -163,8 +313,7 @@ Run browserd on [sprites.dev](https://sprites.dev) infrastructure (Firecracker V
 **Requirements:** `@fly/sprites` package, sprite CLI installed and authenticated
 
 ```typescript
-import { SandboxManager } from "browserd";
-import { SpritesSandboxProvider } from "browserd/providers";
+import { SandboxManager, SpritesSandboxProvider } from "browserd";
 
 // Check dependencies first
 const { available, message } = await SpritesSandboxProvider.checkDependencies();
@@ -182,7 +331,9 @@ const provider = new SpritesSandboxProvider({
 });
 
 const manager = new SandboxManager({ provider });
-const { client, sandbox } = await manager.create();
+const { sandbox, createSession } = await manager.create();
+
+const browser = await createSession();
 ```
 
 **Static Methods:**
@@ -223,8 +374,7 @@ SpritesSandboxProvider.installCli(): Promise<void>
 High-level API for managing sandbox lifecycle.
 
 ```typescript
-import { SandboxManager } from "browserd";
-import { LocalSandboxProvider } from "browserd/providers";
+import { SandboxManager, LocalSandboxProvider } from "browserd";
 
 const manager = new SandboxManager({
   provider: new LocalSandboxProvider(),
@@ -234,22 +384,28 @@ const manager = new SandboxManager({
   },
 });
 
-// Create sandbox and get connected client
-const { client, sandbox } = await manager.create();
+// Create sandbox - returns session management methods
+const { sandbox, createSession, listSessions, getSession, getSessionInfo, destroySession } = await manager.create();
 
 // Access sandbox info
 console.log(sandbox.id);      // "sandbox-abc123"
-console.log(sandbox.wsUrl);   // "ws://localhost:3000/ws"
+console.log(sandbox.wsUrl);   // "ws://localhost:3000/sessions/{id}/ws"
 console.log(sandbox.status);  // "ready"
 
-// Get existing client/sandbox
-const existingClient = manager.getClient(sandbox.id);
+// Create session - returns connected client ready to use
+const browser = await createSession();
+
+// Get existing sandbox info
 const existingSandbox = manager.get(sandbox.id);
+
+// Check if sandbox exists
+manager.has(sandbox.id);  // true
 
 // List all managed sandboxes
 const sandboxes = manager.list();
 
-// Clean up
+// Clean up - close() destroys the session automatically
+await browser.close();
 await manager.destroy(sandbox.id);
 
 // Clean up all sandboxes
@@ -263,6 +419,16 @@ await manager.destroyAll();
 | `size` | `number` | Number of managed sandboxes |
 | `providerName` | `string` | Name of the current provider |
 
+**Session Methods Returned from `create()`:**
+
+| Method | Description |
+|--------|-------------|
+| `createSession(options?)` | Create a new browser session, returns connected client |
+| `listSessions()` | List all sessions on the sandbox |
+| `getSession(sessionId)` | Get a connected client for an existing session |
+| `getSessionInfo(sessionId)` | Get session info without connecting |
+| `destroySession(sessionId)` | Destroy a session (alternative to `client.close()`) |
+
 ---
 
 ## BrowserdClient API
@@ -271,7 +437,7 @@ await manager.destroyAll();
 
 ```typescript
 const client = new BrowserdClient({
-  url: "ws://localhost:3000/ws",
+  url: "ws://localhost:3000/sessions/session-id/ws",
   timeout: 30000,
   autoReconnect: true,
   reconnectInterval: 2000,
@@ -428,6 +594,8 @@ try {
 | `INVALID_PARAMS` | Invalid command parameters |
 | `SANDBOX_CREATION_FAILED` | Failed to create sandbox |
 | `SANDBOX_NOT_FOUND` | Sandbox not found |
+| `SESSION_ERROR` | Session operation failed |
+| `SESSION_NOT_FOUND` | Session not found |
 | `PROVIDER_ERROR` | Provider-specific error |
 
 ---
@@ -440,7 +608,7 @@ Full-duplex connection with real-time streaming:
 
 ```typescript
 const client = new BrowserdClient({
-  url: "ws://localhost:3000/ws",
+  url: "ws://localhost:3000/sessions/session-id/ws",
   transport: "ws",
 });
 ```
@@ -451,15 +619,15 @@ For HTTP-only proxies that don't support WebSocket:
 
 ```typescript
 const client = new BrowserdClient({
-  url: "https://example.com",  // HTTPS URL
+  url: "https://example.com/sessions/session-id",  // Base URL without /stream
   transport: "sse",
   authToken: "bearer-token",   // Required for SSE
 });
 ```
 
 SSE uses:
-- Server-Sent Events for server→client messages
-- HTTP POST for client→server commands
+- Server-Sent Events for server→client messages (GET `/sessions/{id}/stream`)
+- HTTP POST for client→server commands (POST `/sessions/{id}/input`)
 
 ---
 
@@ -487,24 +655,33 @@ import type {
   ScreenshotResult,
   EvaluateOptions,
 
+  // createClient
+  CreateClientOptions,
+  CreateClientResult,
+
   // Sandbox
   CreateSandboxOptions,
   CreateSandboxResult,
   SandboxInfo,
   SandboxStatus,
+  SandboxManagerOptions,
+
+  // Session
+  SessionMethods,
+  SessionInfo,
+  CreateSessionOptions,
+  ListSessionsResponse,
 
   // Viewport
   Viewport,
-} from "browserd";
 
-import type {
   // Providers
   SandboxProvider,
   SandboxProviderOptions,
   LocalSandboxProviderOptions,
   VercelSandboxProviderOptions,
   SpritesSandboxProviderOptions,
-} from "browserd/providers";
+} from "browserd";
 ```
 
 ---
@@ -514,24 +691,24 @@ import type {
 ### Form Automation
 
 ```typescript
-import { SandboxManager } from "browserd";
-import { LocalSandboxProvider } from "browserd/providers";
+import { createClient, LocalSandboxProvider } from "browserd";
 
-const manager = new SandboxManager({
+const { sandbox, manager, createSession } = await createClient({
   provider: new LocalSandboxProvider(),
 });
 
-const { client, sandbox } = await manager.create();
+const browser = await createSession();
 
 try {
-  await client.navigate("https://example.com/login");
-  await client.fill("input[name=email]", "user@example.com");
-  await client.fill("input[name=password]", "password123");
-  await client.click("button[type=submit]");
-  await client.waitForSelector(".dashboard", { timeout: 10000 });
+  await browser.navigate("https://example.com/login");
+  await browser.fill("input[name=email]", "user@example.com");
+  await browser.fill("input[name=password]", "password123");
+  await browser.click("button[type=submit]");
+  await browser.waitForSelector(".dashboard", { timeout: 10000 });
 
   console.log("Login successful!");
 } finally {
+  await browser.close();
   await manager.destroy(sandbox.id);
 }
 ```
@@ -539,12 +716,18 @@ try {
 ### Screenshot Capture
 
 ```typescript
-const { client, sandbox } = await manager.create();
+import { createClient, LocalSandboxProvider } from "browserd";
 
-await client.navigate("https://example.com");
-await client.setViewport(1920, 1080);
+const { sandbox, manager, createSession } = await createClient({
+  provider: new LocalSandboxProvider(),
+});
 
-const screenshot = await client.screenshot({
+const browser = await createSession();
+
+await browser.navigate("https://example.com");
+await browser.setViewport(1920, 1080);
+
+const screenshot = await browser.screenshot({
   type: "png",
   fullPage: true,
 });
@@ -552,30 +735,66 @@ const screenshot = await client.screenshot({
 // Save to file
 await Bun.write("screenshot.png", Buffer.from(screenshot.data, "base64"));
 
+await browser.close();
 await manager.destroy(sandbox.id);
 ```
 
 ### Error Recovery
 
 ```typescript
-import { BrowserdError } from "browserd";
+import { createClient, LocalSandboxProvider, BrowserdError } from "browserd";
 
-const { client, sandbox } = await manager.create();
+const { sandbox, manager, createSession } = await createClient({
+  provider: new LocalSandboxProvider(),
+});
+
+const browser = await createSession();
 
 try {
-  await client.navigate("https://example.com");
-  await client.click("button#submit", { timeout: 5000 });
+  await browser.navigate("https://example.com");
+  await browser.click("button#submit", { timeout: 5000 });
 } catch (error) {
   if (BrowserdError.isBrowserdError(error)) {
     if (error.code === "SELECTOR_NOT_FOUND") {
       console.log("Button not found, trying alternative...");
-      await client.click("input[type=submit]");
+      await browser.click("input[type=submit]");
     } else if (error.code === "COMMAND_TIMEOUT") {
       console.log("Operation timed out, retrying...");
-      await client.click("button#submit", { timeout: 15000 });
+      await browser.click("button#submit", { timeout: 15000 });
     } else {
       throw error;
     }
   }
+} finally {
+  await browser.close();
+  await manager.destroy(sandbox.id);
 }
+```
+
+### Multi-Session Automation
+
+```typescript
+import { createClient, LocalSandboxProvider } from "browserd";
+
+const { sandbox, manager, createSession } = await createClient({
+  provider: new LocalSandboxProvider(),
+});
+
+// Create multiple sessions for parallel automation - each returns connected client
+const browsers = await Promise.all([
+  createSession({ viewport: { width: 1920, height: 1080 } }),
+  createSession({ viewport: { width: 1920, height: 1080 } }),
+  createSession({ viewport: { width: 1920, height: 1080 } }),
+]);
+
+// Run tasks in parallel across different sessions
+await Promise.all([
+  browsers[0].navigate("https://site-a.com"),
+  browsers[1].navigate("https://site-b.com"),
+  browsers[2].navigate("https://site-c.com"),
+]);
+
+// Clean up - each close() destroys its session
+await Promise.all(browsers.map(b => b.close()));
+await manager.destroy(sandbox.id);
 ```

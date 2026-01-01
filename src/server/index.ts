@@ -26,6 +26,7 @@ import {
 	MultiSessionWSHandler,
 	type WebSocketData,
 } from "./ws-handler";
+import { cleanupProcesses, isXvfbNeeded, startXvfb } from "./xvfb-manager";
 
 // SSE Client tracking (now session-aware)
 interface SSEClient {
@@ -111,14 +112,7 @@ async function initBrowser(): Promise<void> {
 		onBroadcast: broadcastToSSE,
 	});
 
-	// Create default session for backward compatibility
-	const defaultSession = await sessionManager.getOrCreateDefault();
-	console.log(`[browserd] Default session created: ${defaultSession.id}`);
-
-	// Navigate to a default page
-	const defaultUrl = process.env.DEFAULT_URL || "about:blank";
-	await defaultSession.page.goto(defaultUrl, { waitUntil: "domcontentloaded" });
-	console.log(`[browserd] Navigated to ${defaultUrl}`);
+	console.log("[browserd] Ready - create sessions via POST /api/sessions");
 }
 
 /**
@@ -364,14 +358,6 @@ async function handleSessionApiRequest(req: Request): Promise<Response | null> {
 	if (req.method === "DELETE" && getMatch) {
 		const sessionId = getMatch[1];
 
-		// Prevent deleting default session
-		if (sessionId === "default") {
-			return Response.json(
-				{ error: "Cannot delete default session", code: "FORBIDDEN" },
-				{ status: 403 },
-			);
-		}
-
 		const deleted = await sessionManager.destroySession(sessionId);
 		if (!deleted) {
 			return Response.json(
@@ -472,39 +458,6 @@ async function handleRequest(
 		});
 	}
 
-	// Legacy WebSocket: /ws (uses default session)
-	if (path === "/ws") {
-		const upgraded = server.upgrade(req, {
-			data: createWebSocketData("default"),
-		});
-
-		if (upgraded) {
-			return undefined;
-		}
-
-		return new Response("WebSocket upgrade failed", { status: 400 });
-	}
-
-	// Legacy SSE: /stream (uses default session)
-	if (path === "/stream") {
-		return createSSEStreamResponse("default");
-	}
-
-	// Legacy HTTP input: /input (uses default session)
-	if (path === "/input" && req.method === "POST") {
-		return handleSessionInput("default", req);
-	}
-
-	// CORS preflight for /input
-	if (path === "/input" && req.method === "OPTIONS") {
-		return new Response(null, {
-			headers: {
-				"Access-Control-Allow-Origin": "*",
-				"Access-Control-Allow-Methods": "POST, OPTIONS",
-				"Access-Control-Allow-Headers": "Content-Type",
-			},
-		});
-	}
 
 	// Health endpoints
 	if (path === "/health" || path === "/healthz") {
@@ -519,14 +472,26 @@ async function handleRequest(
 		return createReadinessResponse(sessionManager);
 	}
 
-	// Viewer page (uses default session)
+	// Sessions list page
 	if (path === "/" || path === "/viewer") {
-		return createViewerResponse({
-			title: "Browserd Viewer",
-			showControls: true,
-			showStats: true,
-			sessionId: "default",
-		});
+		// Redirect to sessions API - client should create a session first
+		const sessions = sessionManager?.listSessions() ?? [];
+		if (sessions.length > 0) {
+			// If sessions exist, redirect to first one
+			return Response.redirect(`/sessions/${sessions[0].id}/viewer`, 302);
+		}
+		// No sessions - return info page
+		return new Response(
+			JSON.stringify({
+				message: "No active sessions. Create a session first.",
+				createSession: "POST /api/sessions",
+				listSessions: "GET /api/sessions",
+			}),
+			{
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			},
+		);
 	}
 
 	// Sessions API
@@ -558,6 +523,9 @@ async function shutdown(): Promise<void> {
 		console.log("[browserd] Session manager closed");
 	}
 
+	// Cleanup Xvfb and any orphaned processes
+	await cleanupProcesses();
+
 	process.exit(0);
 }
 
@@ -570,6 +538,11 @@ process.on("SIGTERM", shutdown);
  */
 async function main(): Promise<void> {
 	try {
+		// Start Xvfb if needed for headed mode
+		if (isXvfbNeeded()) {
+			await startXvfb();
+		}
+
 		// Initialize browser
 		await initBrowser();
 
@@ -596,12 +569,9 @@ async function main(): Promise<void> {
 		});
 
 		console.log(`[browserd] Server listening on http://${HOST}:${PORT}`);
-		console.log(`[browserd] Viewer available at http://${HOST}:${PORT}/`);
-		console.log(`[browserd] WebSocket endpoint: ws://${HOST}:${PORT}/ws`);
-		console.log(
-			`[browserd] SSE stream endpoint: http://${HOST}:${PORT}/stream`,
-		);
-		console.log(`[browserd] HTTP input endpoint: http://${HOST}:${PORT}/input`);
+		console.log(`[browserd] Sessions API: http://${HOST}:${PORT}/api/sessions`);
+		console.log(`[browserd] Create session: POST /api/sessions`);
+		console.log(`[browserd] Session endpoints: /sessions/{id}/ws, /sessions/{id}/stream`);
 	} catch (error) {
 		console.error("[browserd] Failed to start:", error);
 		process.exit(1);
