@@ -23,19 +23,24 @@ interface SandboxEntry {
  * Vercel Sandbox Provider implementation
  *
  * Provisions browserd instances on Vercel's managed sandbox infrastructure.
+ * Supports two deployment modes:
+ * 1. Remote blob storage (if blobBaseUrl provided) - downloads tarball via curl
+ * 2. Local tarball (default) - uploads bundle/browserd.tar.gz via writeFiles
  */
 export class VercelSandboxProvider implements SandboxProvider {
 	readonly name = "vercel";
 
-	private blobBaseUrl: string;
+	private blobBaseUrl?: string;
 	private runtime: string;
 	private defaultTimeout: number;
+	private headed: boolean;
 	private sandboxes = new Map<string, SandboxEntry>();
 
-	constructor(options: VercelSandboxProviderOptions) {
-		this.blobBaseUrl = options.blobBaseUrl.replace(/\/$/, ""); // Remove trailing slash
+	constructor(options: VercelSandboxProviderOptions = {}) {
+		this.blobBaseUrl = options.blobBaseUrl?.replace(/\/$/, ""); // Remove trailing slash
 		this.runtime = options.runtime ?? "node24";
 		this.defaultTimeout = options.defaultTimeout ?? 300000; // 5 minutes
+		this.headed = options.headed ?? true;
 	}
 
 	/**
@@ -80,20 +85,8 @@ export class VercelSandboxProvider implements SandboxProvider {
 		this.sandboxes.set(sandboxId, { sandbox, info, port });
 
 		try {
-			// Run the install script to set up browserd
-			const installScript = `${this.blobBaseUrl}/install.sh`;
-			const tarballUrl = `${this.blobBaseUrl}/browserd.tar.gz`;
-
-			const installResult = await sandbox.runCommand("sh", [
-				"-c",
-				`curl -fsSL "${installScript}" | TARBALL_URL="${tarballUrl}" PORT="${port}" sh`,
-			]);
-
-			if (installResult.exitCode !== 0) {
-				throw new Error(
-					`Install script failed with exit code ${installResult.exitCode}: ${installResult.stderr}`,
-				);
-			}
+			// Deploy browserd to the sandbox
+			await this.deployBrowserd(sandbox, port);
 
 			// Wait for browserd to be ready
 			const ready = await this.waitForReady(sandboxId, domain, port, 60000);
@@ -156,6 +149,90 @@ export class VercelSandboxProvider implements SandboxProvider {
 		}
 
 		return { ...entry.info };
+	}
+
+	/**
+	 * Deploy browserd to the sandbox
+	 *
+	 * Two modes:
+	 * 1. If blobBaseUrl is set, download tarball via curl
+	 * 2. Otherwise, upload local bundle/browserd.tar.gz via writeFiles
+	 */
+	private async deployBrowserd(sandbox: Sandbox, port: number): Promise<void> {
+		const workDir = "/tmp/browserd-install";
+		const headless = this.headed ? "false" : "true";
+
+		if (this.blobBaseUrl) {
+			// Mode 1: Download from blob storage
+			const tarballUrl = `${this.blobBaseUrl}/browserd.tar.gz`;
+
+			const downloadResult = await sandbox.runCommand("sh", [
+				"-c",
+				`mkdir -p ${workDir} && curl -fsSL "${tarballUrl}" | tar xz -C ${workDir}`,
+			]);
+			if (downloadResult.exitCode !== 0) {
+				throw new Error(
+					`Failed to download tarball: ${downloadResult.exitCode}`,
+				);
+			}
+		} else {
+			// Mode 2: Upload local tarball via writeFiles
+			const bundlePath = "bundle/browserd.tar.gz";
+			const file = Bun.file(bundlePath);
+
+			if (!(await file.exists())) {
+				throw BrowserdError.providerError(
+					`Bundle tarball not found at ${bundlePath}. Run 'bun run bundle' first, or provide blobBaseUrl option.`,
+				);
+			}
+
+			const tarballData = Buffer.from(await file.arrayBuffer());
+			const tarballPath = "/tmp/browserd.tar.gz";
+
+			// Upload tarball to sandbox
+			await sandbox.writeFiles([{ path: tarballPath, content: tarballData }]);
+
+			// Extract tarball
+			const extractResult = await sandbox.runCommand("sh", [
+				"-c",
+				`mkdir -p ${workDir} && tar xzf ${tarballPath} -C ${workDir} && rm ${tarballPath}`,
+			]);
+			if (extractResult.exitCode !== 0) {
+				throw new Error(`Failed to extract tarball: ${extractResult.exitCode}`);
+			}
+		}
+
+		// Install dependencies
+		const installResult = await sandbox.runCommand("sh", [
+			"-c",
+			`cd ${workDir}/browserd && bun install --production`,
+		]);
+		if (installResult.exitCode !== 0) {
+			throw new Error(
+				`Failed to install dependencies: ${installResult.exitCode}`,
+			);
+		}
+
+		// Install Playwright Chromium
+		const playwrightResult = await sandbox.runCommand("sh", [
+			"-c",
+			`cd ${workDir}/browserd && bunx playwright install chromium`,
+		]);
+		if (playwrightResult.exitCode !== 0) {
+			throw new Error(
+				`Failed to install Playwright: ${playwrightResult.exitCode}`,
+			);
+		}
+
+		// Start browserd server in detached mode
+		await sandbox.runCommand({
+			cmd: "sh",
+			args: [
+				"-c",
+				`cd ${workDir}/browserd && HEADLESS=${headless} PORT=${port} bun run src/server/index.ts`,
+			],
+			detached: true,
+		});
 	}
 
 	/**

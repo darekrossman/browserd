@@ -63,10 +63,17 @@ export interface SandboxProviderOptions {
  * Options for Vercel Sandbox Provider
  */
 export interface VercelSandboxProviderOptions extends SandboxProviderOptions {
-	/** Base URL for blob storage where install.sh and browserd.tar.gz are stored */
-	blobBaseUrl: string;
+	/**
+	 * Base URL for blob storage where browserd.tar.gz is stored (optional)
+	 *
+	 * If not provided, the provider will use the local bundle/browserd.tar.gz
+	 * file and deploy it via base64 encoding.
+	 */
+	blobBaseUrl?: string;
 	/** Vercel sandbox runtime (default: "node24") */
 	runtime?: string;
+	/** Run browser in headed mode (default: false - headless) */
+	headed?: boolean;
 }
 
 /**
