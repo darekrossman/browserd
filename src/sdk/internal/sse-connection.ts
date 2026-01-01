@@ -12,7 +12,12 @@ import { BrowserdError } from "../errors";
 import type { ConnectionState, ConnectionStateChange } from "../types";
 
 export interface SSEConnectionManagerOptions {
-	/** Base HTTP URL (e.g., "https://example.com") */
+	/**
+	 * URL for SSE connection. Can be:
+	 * - Base URL: "https://example.com" (will use /stream and /input)
+	 * - Stream URL: "https://example.com/stream" (will derive /input)
+	 * - Session URL: "https://example.com/sessions/{id}/stream" (will derive session-specific /input)
+	 */
 	url: string;
 	/** Connection timeout in milliseconds */
 	timeout?: number;
@@ -36,7 +41,8 @@ type ErrorHandler = (error: Error) => void;
  */
 export class SSEConnectionManager {
 	private state: ConnectionState = "disconnected";
-	private baseUrl: string;
+	private streamUrl: string;
+	private inputUrl: string;
 	private timeout: number;
 	private autoReconnect: boolean;
 	private reconnectInterval: number;
@@ -54,16 +60,70 @@ export class SSEConnectionManager {
 	private streamReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
 	constructor(options: SSEConnectionManagerOptions) {
-		// Convert ws:// or wss:// to http:// or https://
-		this.baseUrl = options.url
+		// Normalize URL (convert ws:// to http://)
+		let url = options.url
 			.replace(/^wss:\/\//, "https://")
-			.replace(/^ws:\/\//, "http://")
-			.replace(/\/ws$/, ""); // Remove /ws suffix if present
+			.replace(/^ws:\/\//, "http://");
+
+		// Derive stream and input URLs based on URL format
+		const { streamUrl, inputUrl } = this.deriveEndpointUrls(url);
+		this.streamUrl = streamUrl;
+		this.inputUrl = inputUrl;
+
 		this.timeout = options.timeout ?? 30000;
 		this.autoReconnect = options.autoReconnect ?? true;
 		this.reconnectInterval = options.reconnectInterval ?? 2000;
 		this.maxReconnectAttempts = options.maxReconnectAttempts ?? 5;
 		this.authToken = options.authToken;
+	}
+
+	/**
+	 * Derive stream and input URLs from the provided URL.
+	 * Handles various URL formats:
+	 * - Base URL: "http://host:3000" → stream="/stream", input="/input"
+	 * - Legacy stream: "http://host:3000/stream" → stream="/stream", input="/input"
+	 * - Session stream: "http://host:3000/sessions/{id}/stream" → session-specific URLs
+	 * - Legacy ws path: "http://host:3000/ws" → stream="/stream", input="/input"
+	 */
+	private deriveEndpointUrls(url: string): {
+		streamUrl: string;
+		inputUrl: string;
+	} {
+		// Check for session-specific URL pattern: /sessions/{id}/stream
+		const sessionMatch = url.match(
+			/^(.+)\/sessions\/([^/]+)\/(stream|ws)$/,
+		);
+		if (sessionMatch) {
+			const baseUrl = sessionMatch[1];
+			const sessionId = sessionMatch[2];
+			return {
+				streamUrl: `${baseUrl}/sessions/${sessionId}/stream`,
+				inputUrl: `${baseUrl}/sessions/${sessionId}/input`,
+			};
+		}
+
+		// Check for legacy /stream or /ws suffix
+		if (url.endsWith("/stream")) {
+			const baseUrl = url.replace(/\/stream$/, "");
+			return {
+				streamUrl: `${baseUrl}/stream`,
+				inputUrl: `${baseUrl}/input`,
+			};
+		}
+
+		if (url.endsWith("/ws")) {
+			const baseUrl = url.replace(/\/ws$/, "");
+			return {
+				streamUrl: `${baseUrl}/stream`,
+				inputUrl: `${baseUrl}/input`,
+			};
+		}
+
+		// Plain base URL
+		return {
+			streamUrl: `${url}/stream`,
+			inputUrl: `${url}/input`,
+		};
 	}
 
 	/**
@@ -118,8 +178,7 @@ export class SSEConnectionManager {
 			}, this.timeout);
 
 			const doConnect = async () => {
-				const streamUrl = `${this.baseUrl}/stream`;
-				const response = await fetch(streamUrl, {
+				const response = await fetch(this.streamUrl, {
 					method: "GET",
 					headers: this.getHeaders({
 						Accept: "text/event-stream",
@@ -277,10 +336,8 @@ export class SSEConnectionManager {
 	 * Send a message and wait for HTTP response
 	 */
 	private async sendAsync(message: ClientMessage): Promise<void> {
-		const inputUrl = `${this.baseUrl}/input`;
-
 		try {
-			const response = await fetch(inputUrl, {
+			const response = await fetch(this.inputUrl, {
 				method: "POST",
 				headers: this.getHeaders({
 					"Content-Type": "application/json",

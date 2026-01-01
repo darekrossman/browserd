@@ -22,6 +22,10 @@ export type BrowserdErrorCode =
 	| "EXECUTION_ERROR"
 	| "UNKNOWN_METHOD"
 	| "INVALID_PARAMS"
+	// Session errors
+	| "SESSION_ERROR"
+	| "SESSION_NOT_FOUND"
+	| "SESSION_LIMIT_REACHED"
 	// Sandbox errors
 	| "SANDBOX_CREATION_FAILED"
 	| "SANDBOX_NOT_FOUND"

@@ -254,6 +254,7 @@ export class SpritesSandboxProvider implements SandboxProvider {
 			id: sandboxId,
 			domain: spriteUrl,
 			wsUrl: `${spriteUrl.replace("https://", "wss://")}/ws`,
+			streamUrl: `${spriteUrl}/stream`,
 			status: "creating",
 			createdAt: Date.now(),
 			transport: this.useLocalProxy ? "ws" : "sse",
@@ -294,6 +295,18 @@ export class SpritesSandboxProvider implements SandboxProvider {
 			} else {
 				// SSE mode: make URL public so users can access the viewer
 				await this.makeUrlPublic(sprite.name);
+
+				// Wait for external connectivity to be ready
+				// The sprites.dev proxy may take a moment to route traffic after making URL public
+				const externalReady = await this.waitForExternalReady(
+					spriteUrl,
+					Math.min(30000, timeout),
+				);
+				if (!externalReady) {
+					throw new Error(
+						"External connectivity to browserd not ready. The sprites.dev proxy may not be routing traffic correctly.",
+					);
+				}
 			}
 
 			// Update status to ready
@@ -505,6 +518,56 @@ export class SpritesSandboxProvider implements SandboxProvider {
 	}
 
 	/**
+	 * Wait for external connectivity to browserd via sprites.dev proxy
+	 * This verifies we can reach the health endpoint from outside the sprite
+	 */
+	private async waitForExternalReady(
+		spriteUrl: string,
+		timeout: number,
+	): Promise<boolean> {
+		const deadline = Date.now() + timeout;
+		const pollInterval = 1000;
+		const healthUrl = `${spriteUrl}/health`;
+
+		this.log(`Waiting for external connectivity at ${healthUrl}...`);
+
+		while (Date.now() < deadline) {
+			try {
+				const response = await fetch(healthUrl, {
+					method: "GET",
+					headers: this.token
+						? { Authorization: `Bearer ${this.token}` }
+						: undefined,
+					signal: AbortSignal.timeout(5000),
+				});
+
+				if (response.ok) {
+					const data = await response.json().catch(() => ({}));
+					if (data.status === "healthy" || data.browser?.ready) {
+						this.log("External connectivity verified");
+						return true;
+					}
+				}
+
+				// Log non-success responses for debugging
+				if (this.debug && response.status !== 502) {
+					this.log(`Health check returned ${response.status}`);
+				}
+			} catch (err) {
+				// Log errors for debugging (but not every iteration)
+				if (this.debug && Date.now() > deadline - timeout + 5000) {
+					this.log(
+						`Health check error: ${err instanceof Error ? err.message : String(err)}`,
+					);
+				}
+			}
+			await sleep(pollInterval);
+		}
+
+		return false;
+	}
+
+	/**
 	 * Ensure sprite has all required dependencies
 	 */
 	private async ensureSetup(sprite: SpriteWithUrl): Promise<void> {
@@ -698,7 +761,7 @@ export class SpritesSandboxProvider implements SandboxProvider {
 					cmd: "bash",
 					args: [
 						"-c",
-						"Xvfb :99 -screen 0 1280x720x24 &>/dev/null & sleep 0.5 && DISPLAY=:99 bun /home/sprite/browserd.js",
+						"Xvfb :99 -screen 0 1200x900x24 &>/dev/null & sleep 0.5 && DISPLAY=:99 bun /home/sprite/browserd.js",
 					],
 					http_port: 3000,
 					env: { HEADLESS: "false" },

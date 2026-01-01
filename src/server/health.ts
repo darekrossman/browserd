@@ -4,7 +4,7 @@
  * Provides health check endpoints and status information
  */
 
-import type { BrowserManager } from "./browser-manager";
+import type { SessionManager } from "./session-manager";
 
 export interface HealthStatus {
 	status: "healthy" | "unhealthy" | "degraded";
@@ -13,7 +13,10 @@ export interface HealthStatus {
 	browser: {
 		running: boolean;
 		connected: boolean;
-		url: string | null;
+	};
+	sessions: {
+		count: number;
+		maxSessions: number;
 	};
 	memory: {
 		heapUsed: number;
@@ -28,23 +31,16 @@ const startTime = Date.now();
  * Get comprehensive health status
  */
 export function getHealthStatus(
-	browserManager: BrowserManager | null,
+	sessionManager: SessionManager | null,
 ): HealthStatus {
-	const browserStatus = browserManager?.getStatus() ?? {
-		running: false,
-		connected: false,
-		viewport: null,
-		url: null,
-	};
-
 	const memoryUsage = process.memoryUsage();
+	const isRunning = sessionManager?.isRunning() ?? false;
 
 	// Determine overall health
 	let status: HealthStatus["status"] = "healthy";
-	if (browserManager && !browserStatus.running) {
+	if (!sessionManager) {
 		status = "degraded";
-	}
-	if (browserManager && browserStatus.running && !browserStatus.connected) {
+	} else if (!isRunning) {
 		status = "unhealthy";
 	}
 
@@ -53,9 +49,12 @@ export function getHealthStatus(
 		timestamp: new Date().toISOString(),
 		uptime: Math.floor((Date.now() - startTime) / 1000),
 		browser: {
-			running: browserStatus.running,
-			connected: browserStatus.connected,
-			url: browserStatus.url,
+			running: isRunning,
+			connected: isRunning,
+		},
+		sessions: {
+			count: sessionManager?.getSessionCount() ?? 0,
+			maxSessions: sessionManager?.getMaxSessions() ?? 0,
 		},
 		memory: {
 			heapUsed: memoryUsage.heapUsed,
@@ -73,24 +72,18 @@ export function getLivenessStatus(): { ok: boolean } {
 }
 
 /**
- * Readiness check - requires browser to be available
+ * Readiness check - requires session manager to be available
  */
-export function getReadinessStatus(browserManager: BrowserManager | null): {
+export function getReadinessStatus(sessionManager: SessionManager | null): {
 	ready: boolean;
 	reason?: string;
 } {
-	if (!browserManager) {
-		return { ready: false, reason: "Browser manager not initialized" };
+	if (!sessionManager) {
+		return { ready: false, reason: "Session manager not initialized" };
 	}
 
-	const status = browserManager.getStatus();
-
-	if (!status.running) {
+	if (!sessionManager.isRunning()) {
 		return { ready: false, reason: "Browser not running" };
-	}
-
-	if (!status.connected) {
-		return { ready: false, reason: "Browser disconnected" };
 	}
 
 	return { ready: true };
@@ -100,9 +93,9 @@ export function getReadinessStatus(browserManager: BrowserManager | null): {
  * Create health check HTTP response
  */
 export function createHealthResponse(
-	browserManager: BrowserManager | null,
+	sessionManager: SessionManager | null,
 ): Response {
-	const health = getHealthStatus(browserManager);
+	const health = getHealthStatus(sessionManager);
 	const statusCode =
 		health.status === "healthy"
 			? 200
@@ -133,9 +126,9 @@ export function createLivenessResponse(): Response {
  * Create readiness check HTTP response
  */
 export function createReadinessResponse(
-	browserManager: BrowserManager | null,
+	sessionManager: SessionManager | null,
 ): Response {
-	const readiness = getReadinessStatus(browserManager);
+	const readiness = getReadinessStatus(sessionManager);
 	const statusCode = readiness.ready ? 200 : 503;
 
 	return new Response(JSON.stringify(readiness), {

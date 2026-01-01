@@ -9,6 +9,8 @@ export interface ViewerOptions {
 	title?: string;
 	showControls?: boolean;
 	showStats?: boolean;
+	/** Session ID to connect to (optional, defaults to "default") */
+	sessionId?: string;
 }
 
 /**
@@ -19,7 +21,13 @@ export function generateViewerHTML(options: ViewerOptions = {}): string {
 		title = "Browserd Viewer",
 		showControls = true,
 		showStats = true,
+		sessionId = "default",
 	} = options;
+
+	// Build session-specific or legacy paths
+	const wsPath = sessionId === "default" ? "/ws" : `/sessions/${sessionId}/ws`;
+	const streamPath = sessionId === "default" ? "/stream" : `/sessions/${sessionId}/stream`;
+	const inputPath = sessionId === "default" ? "/input" : `/sessions/${sessionId}/input`;
 
 	return `<!DOCTYPE html>
 <html lang="en">
@@ -309,11 +317,11 @@ export function generateViewerHTML(options: ViewerOptions = {}): string {
       // Initial resize
       resizeCanvasDisplay();
 
-      // URLs
+      // URLs (session-specific)
       const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = wsProtocol + '//' + location.host + '/ws';
-      const streamUrl = location.protocol + '//' + location.host + '/stream';
-      const inputUrl = location.protocol + '//' + location.host + '/input';
+      const wsUrl = wsProtocol + '//' + location.host + '${wsPath}';
+      const streamUrl = location.protocol + '//' + location.host + '${streamPath}';
+      const inputUrl = location.protocol + '//' + location.host + '${inputPath}';
 
       // Check for forced transport via query param
       const urlParams = new URLSearchParams(location.search);

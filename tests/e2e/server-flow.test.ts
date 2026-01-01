@@ -12,20 +12,21 @@ import {
 	expect,
 	test,
 } from "bun:test";
-import { clearAllSessions, handleSessionRequest } from "../../src/api/sessions";
 import { createViewerResponse } from "../../src/client/viewer-template";
 import type { PlaywrightMethod } from "../../src/protocol/types";
-import { BrowserManager } from "../../src/server/browser-manager";
-import { CommandQueue } from "../../src/server/command-queue";
 import {
 	createHealthResponse,
 	createLivenessResponse,
 	createReadinessResponse,
 } from "../../src/server/health";
 import {
+	createSessionManager,
+	type SessionManager,
+} from "../../src/server/session-manager";
+import {
 	createWebSocketData,
+	MultiSessionWSHandler,
 	type WebSocketData,
-	WSHandler,
 } from "../../src/server/ws-handler";
 import { hasBrowserSupport, sleep } from "../helpers/setup";
 import { TestWSClient } from "../helpers/ws-client";
@@ -44,39 +45,27 @@ const WS_URL = `ws://127.0.0.1:${TEST_PORT}/ws`;
 
 describe("E2E Full Flow", () => {
 	let server: ReturnType<typeof Bun.serve> | null = null;
-	let browserManager: BrowserManager | null = null;
-	let wsHandler: WSHandler | null = null;
-	let commandQueue: CommandQueue | null = null;
+	let sessionManager: SessionManager | null = null;
+	let wsHandler: MultiSessionWSHandler | null = null;
 
 	beforeAll(async () => {
 		if (!runTests) return;
 
-		// Start browser
-		browserManager = new BrowserManager({
-			headless: true,
-			viewport: { width: 1280, height: 720 },
-		});
-		await browserManager.launch();
+		// Create and initialize session manager
+		sessionManager = createSessionManager();
+		await sessionManager.initialize();
 
-		// Create command queue
-		commandQueue = new CommandQueue({
-			page: browserManager.getPage(),
-			timeout: 10000,
-		});
+		// Create default session
+		const defaultSession = await sessionManager.getOrCreateDefault();
 
-		// Create WS handler
-		wsHandler = new WSHandler({
-			browserManager,
-			onCommand: async (ws, cmd) => {
-				if (commandQueue) {
-					const result = await commandQueue.enqueue(cmd);
-					wsHandler?.send(ws, result);
-				}
+		// Create WS handler with session manager
+		wsHandler = new MultiSessionWSHandler({
+			sessionManager,
+			onCommand: async (ws, cmd, session) => {
+				const result = await session.commandQueue.enqueue(cmd);
+				wsHandler?.send(ws, result);
 			},
 		});
-
-		// Initialize CDP for screencast
-		await wsHandler.initCDP();
 
 		// Start server
 		server = Bun.serve<WebSocketData>({
@@ -89,7 +78,7 @@ describe("E2E Full Flow", () => {
 				// WebSocket upgrade
 				if (path === "/ws") {
 					const upgraded = server.upgrade(req, {
-						data: createWebSocketData(),
+						data: createWebSocketData("default"),
 					});
 					return upgraded
 						? undefined
@@ -97,16 +86,12 @@ describe("E2E Full Flow", () => {
 				}
 
 				// Health endpoints
-				if (path === "/health") return createHealthResponse(browserManager);
+				if (path === "/health") return createHealthResponse(sessionManager);
 				if (path === "/livez") return createLivenessResponse();
-				if (path === "/readyz") return createReadinessResponse(browserManager);
+				if (path === "/readyz") return createReadinessResponse(sessionManager);
 
 				// Viewer
 				if (path === "/" || path === "/viewer") return createViewerResponse();
-
-				// Sessions API
-				const sessionRes = await handleSessionRequest(req, BASE_URL);
-				if (sessionRes) return sessionRes;
 
 				return new Response("Not Found", { status: 404 });
 			},
@@ -136,14 +121,10 @@ describe("E2E Full Flow", () => {
 			/* ignore */
 		}
 		try {
-			if (browserManager) await browserManager.close().catch(() => {});
+			if (sessionManager) await sessionManager.close().catch(() => {});
 		} catch {
 			/* ignore */
 		}
-	});
-
-	beforeEach(() => {
-		clearAllSessions();
 	});
 
 	describe("Test 1: Basic viewing flow", () => {

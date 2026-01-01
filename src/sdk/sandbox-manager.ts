@@ -59,10 +59,21 @@ export class SandboxManager {
 		// Track the sandbox
 		this.sandboxes.set(sandbox.id, sandbox);
 
+		// Determine the connection URL based on transport
+		// - For WebSocket: use wsUrl
+		// - For SSE: use streamUrl if available, otherwise derive from wsUrl
+		const transport = sandbox.transport ?? "ws";
+		let connectionUrl: string;
+		if (transport === "sse" && sandbox.streamUrl) {
+			connectionUrl = sandbox.streamUrl;
+		} else {
+			connectionUrl = sandbox.wsUrl;
+		}
+
 		// Create and connect client with appropriate transport
 		const client = new BrowserdClient({
-			url: sandbox.wsUrl,
-			transport: sandbox.transport ?? "ws",
+			url: connectionUrl,
+			transport,
 			authToken: sandbox.authToken,
 			...this.clientOptions,
 		});

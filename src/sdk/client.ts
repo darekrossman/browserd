@@ -19,14 +19,17 @@ import type {
 	ClickOptions,
 	ConnectionState,
 	ConnectionStateChange,
+	CreateSessionOptions,
 	EvaluateOptions,
 	FillOptions,
 	HoverOptions,
+	ListSessionsResponse,
 	NavigateOptions,
 	NavigateResult,
 	PressOptions,
 	ScreenshotOptions,
 	ScreenshotResult,
+	SessionInfo,
 	TransportType,
 	TypeOptions,
 	WaitOptions,
@@ -55,10 +58,16 @@ export class BrowserdClient {
 	private defaultTimeout: number;
 	private pingHandlers: Array<(latency: number) => void> = [];
 	private transport: TransportType;
+	private baseUrl: string;
+	private options: BrowserdClientOptions;
 
 	constructor(options: BrowserdClientOptions) {
+		this.options = options;
 		this.defaultTimeout = options.timeout ?? 30000;
 		this.transport = options.transport ?? "ws";
+
+		// Extract base URL for API calls
+		this.baseUrl = this.extractBaseUrl(options.url);
 
 		// Create appropriate connection manager based on transport
 		if (this.transport === "sse") {
@@ -445,5 +454,173 @@ export class BrowserdClient {
 		}
 		// Frame and event messages are not handled by the client
 		// They could be exposed via event handlers if needed
+	}
+
+	/**
+	 * Extract base URL from connection URL
+	 */
+	private extractBaseUrl(url: string): string {
+		// Handle WebSocket URLs
+		if (url.startsWith("ws://") || url.startsWith("wss://")) {
+			const httpUrl = url.replace(/^ws/, "http");
+			// Remove /ws path if present
+			return httpUrl.replace(/\/ws$/, "").replace(/\/sessions\/[^/]+\/ws$/, "");
+		}
+		// Handle HTTP URLs (for SSE transport)
+		return url.replace(/\/stream$/, "").replace(/\/sessions\/[^/]+\/stream$/, "");
+	}
+
+	// ============================================================================
+	// Session Management
+	// ============================================================================
+
+	/**
+	 * Create a new browser session
+	 *
+	 * Sessions provide isolated browser contexts with separate cookies, storage,
+	 * and page state. Use this when you need multiple independent browser instances.
+	 *
+	 * @example
+	 * ```typescript
+	 * const session = await client.createSession({
+	 *   viewport: { width: 1920, height: 1080 }
+	 * });
+	 * const sessionClient = await client.getSessionClient(session.id);
+	 * await sessionClient.navigate("https://example.com");
+	 * ```
+	 */
+	async createSession(options?: CreateSessionOptions): Promise<SessionInfo> {
+		const response = await fetch(`${this.baseUrl}/api/sessions`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				...(this.options.authToken && {
+					Authorization: `Bearer ${this.options.authToken}`,
+				}),
+			},
+			body: JSON.stringify(options ?? {}),
+		});
+
+		if (!response.ok) {
+			const error = await response.json().catch(() => ({ error: "Unknown error" }));
+			throw new BrowserdError(
+				"SESSION_ERROR",
+				error.error || `Failed to create session: ${response.status}`,
+			);
+		}
+
+		return response.json();
+	}
+
+	/**
+	 * List all active sessions
+	 */
+	async listSessions(): Promise<ListSessionsResponse> {
+		const response = await fetch(`${this.baseUrl}/api/sessions`, {
+			headers: {
+				...(this.options.authToken && {
+					Authorization: `Bearer ${this.options.authToken}`,
+				}),
+			},
+		});
+
+		if (!response.ok) {
+			throw new BrowserdError(
+				"SESSION_ERROR",
+				`Failed to list sessions: ${response.status}`,
+			);
+		}
+
+		return response.json();
+	}
+
+	/**
+	 * Get information about a specific session
+	 */
+	async getSession(sessionId: string): Promise<SessionInfo> {
+		const response = await fetch(`${this.baseUrl}/api/sessions/${sessionId}`, {
+			headers: {
+				...(this.options.authToken && {
+					Authorization: `Bearer ${this.options.authToken}`,
+				}),
+			},
+		});
+
+		if (!response.ok) {
+			if (response.status === 404) {
+				throw new BrowserdError("SESSION_NOT_FOUND", `Session ${sessionId} not found`);
+			}
+			throw new BrowserdError(
+				"SESSION_ERROR",
+				`Failed to get session: ${response.status}`,
+			);
+		}
+
+		return response.json();
+	}
+
+	/**
+	 * Destroy a session
+	 *
+	 * This closes the browser context and disconnects all clients.
+	 * The default session cannot be destroyed.
+	 */
+	async destroySession(sessionId: string): Promise<void> {
+		const response = await fetch(`${this.baseUrl}/api/sessions/${sessionId}`, {
+			method: "DELETE",
+			headers: {
+				...(this.options.authToken && {
+					Authorization: `Bearer ${this.options.authToken}`,
+				}),
+			},
+		});
+
+		if (!response.ok) {
+			if (response.status === 404) {
+				throw new BrowserdError("SESSION_NOT_FOUND", `Session ${sessionId} not found`);
+			}
+			if (response.status === 403) {
+				throw new BrowserdError("SESSION_ERROR", "Cannot destroy default session");
+			}
+			throw new BrowserdError(
+				"SESSION_ERROR",
+				`Failed to destroy session: ${response.status}`,
+			);
+		}
+	}
+
+	/**
+	 * Get a client connected to a specific session
+	 *
+	 * Creates a new BrowserdClient instance configured to connect to the
+	 * specified session's WebSocket endpoint.
+	 *
+	 * @example
+	 * ```typescript
+	 * const session = await client.createSession();
+	 * const sessionClient = await client.getSessionClient(session.id);
+	 * await sessionClient.connect();
+	 * await sessionClient.navigate("https://example.com");
+	 * ```
+	 */
+	async getSessionClient(sessionId: string): Promise<BrowserdClient> {
+		// Get session info to get the correct URLs
+		const session = await this.getSession(sessionId);
+
+		// Create new client with session-specific URL
+		const sessionUrl = this.transport === "sse" ? session.streamUrl : session.wsUrl;
+
+		return new BrowserdClient({
+			...this.options,
+			url: sessionUrl,
+			transport: this.transport,
+		});
+	}
+
+	/**
+	 * Get the base URL for API calls
+	 */
+	getBaseUrl(): string {
+		return this.baseUrl;
 	}
 }

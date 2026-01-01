@@ -213,6 +213,8 @@ export interface SandboxInfo {
 	domain: string;
 	/** WebSocket URL for browserd connection */
 	wsUrl: string;
+	/** SSE stream URL for browserd connection (when transport is "sse") */
+	streamUrl?: string;
 	/** Current status */
 	status: SandboxStatus;
 	/** Creation timestamp */
@@ -235,6 +237,68 @@ export interface CreateSandboxResult {
 	client: import("./client").BrowserdClient;
 	/** Sandbox information */
 	sandbox: SandboxInfo;
+}
+
+// ============================================================================
+// Session Types
+// ============================================================================
+
+/**
+ * Options for creating a new browser session
+ */
+export interface CreateSessionOptions {
+	/** Viewport dimensions */
+	viewport?: {
+		width: number;
+		height: number;
+	};
+	/** Browser profile to use (e.g., "chrome-mac", "chrome-win") */
+	profile?: string;
+	/** Initial URL to navigate to */
+	initialUrl?: string;
+}
+
+/**
+ * Information about a browser session
+ */
+export interface SessionInfo {
+	/** Unique session identifier */
+	id: string;
+	/** Session status */
+	status: "creating" | "ready" | "closing" | "closed";
+	/** WebSocket URL for this session */
+	wsUrl: string;
+	/** SSE stream URL for this session */
+	streamUrl: string;
+	/** HTTP input URL for this session */
+	inputUrl: string;
+	/** Viewer URL for this session */
+	viewerUrl: string;
+	/** Session viewport */
+	viewport: {
+		width: number;
+		height: number;
+	};
+	/** Number of connected clients */
+	clientCount?: number;
+	/** Creation timestamp */
+	createdAt: number;
+	/** Last activity timestamp */
+	lastActivity?: number;
+	/** Current page URL */
+	url?: string;
+}
+
+/**
+ * Response from listing sessions
+ */
+export interface ListSessionsResponse {
+	/** List of sessions */
+	sessions: SessionInfo[];
+	/** Total count */
+	count: number;
+	/** Maximum allowed sessions */
+	maxSessions: number;
 }
 
 // ============================================================================
