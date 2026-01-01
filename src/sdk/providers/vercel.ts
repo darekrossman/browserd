@@ -40,7 +40,8 @@ export class VercelSandboxProvider implements SandboxProvider {
 		this.blobBaseUrl = options.blobBaseUrl?.replace(/\/$/, ""); // Remove trailing slash
 		this.runtime = options.runtime ?? "node24";
 		this.defaultTimeout = options.defaultTimeout ?? 300000; // 5 minutes
-		this.headed = options.headed ?? true;
+		// Default to headless mode since Vercel sandboxes don't have a display
+		this.headed = options.headed ?? false;
 	}
 
 	/**
@@ -157,10 +158,25 @@ export class VercelSandboxProvider implements SandboxProvider {
 	 * Two modes:
 	 * 1. If blobBaseUrl is set, download tarball via curl
 	 * 2. Otherwise, upload local bundle/browserd.tar.gz via writeFiles
+	 *
+	 * The tarball contains a bundled browserd.js file. We need to:
+	 * 1. Extract and find browserd.js
+	 * 2. Install rebrowser-playwright (external dependency)
+	 * 3. Install Chromium browser
+	 * 4. Run browserd.js with bun
 	 */
 	private async deployBrowserd(sandbox: Sandbox, port: number): Promise<void> {
-		const workDir = "/tmp/browserd-install";
+		const browserdPath = "/tmp/browserd.js";
 		const headless = this.headed ? "false" : "true";
+
+		// Extract script: extract tarball, find browserd.js, move to known location
+		const extractScript = `
+			rm -rf /tmp/browserd-extract &&
+			mkdir -p /tmp/browserd-extract &&
+			tar xzf /tmp/browserd.tar.gz -C /tmp/browserd-extract &&
+			find /tmp/browserd-extract -name 'browserd.js' -exec mv {} ${browserdPath} \\; &&
+			rm -rf /tmp/browserd-extract /tmp/browserd.tar.gz
+		`.replace(/\n\s*/g, " ").trim();
 
 		if (this.blobBaseUrl) {
 			// Mode 1: Download from blob storage
@@ -168,11 +184,11 @@ export class VercelSandboxProvider implements SandboxProvider {
 
 			const downloadResult = await sandbox.runCommand("sh", [
 				"-c",
-				`mkdir -p ${workDir} && curl -fsSL "${tarballUrl}" | tar xz -C ${workDir}`,
+				`curl -fsSL "${tarballUrl}" -o /tmp/browserd.tar.gz && ${extractScript}`,
 			]);
 			if (downloadResult.exitCode !== 0) {
 				throw new Error(
-					`Failed to download tarball: ${downloadResult.exitCode}`,
+					`Failed to download/extract tarball: exit ${downloadResult.exitCode}`,
 				);
 			}
 		} else {
@@ -187,41 +203,55 @@ export class VercelSandboxProvider implements SandboxProvider {
 			}
 
 			const tarballData = Buffer.from(await file.arrayBuffer());
-			const tarballPath = "/tmp/browserd.tar.gz";
 
 			// Upload tarball to sandbox
-			await sandbox.writeFiles([{ path: tarballPath, content: tarballData }]);
+			await sandbox.writeFiles([
+				{ path: "/tmp/browserd.tar.gz", content: tarballData },
+			]);
 
 			// Extract tarball
-			const extractResult = await sandbox.runCommand("sh", [
-				"-c",
-				`mkdir -p ${workDir} && tar xzf ${tarballPath} -C ${workDir} && rm ${tarballPath}`,
-			]);
+			const extractResult = await sandbox.runCommand("sh", ["-c", extractScript]);
 			if (extractResult.exitCode !== 0) {
-				throw new Error(`Failed to extract tarball: ${extractResult.exitCode}`);
+				throw new Error(`Failed to extract tarball: exit ${extractResult.exitCode}`);
 			}
 		}
 
-		// Install dependencies
-		const installResult = await sandbox.runCommand("sh", [
+		// Verify browserd.js was extracted
+		const verifyResult = await sandbox.runCommand("sh", [
 			"-c",
-			`cd ${workDir}/browserd && bun install --production`,
+			`test -f ${browserdPath} && echo "ok"`,
 		]);
-		if (installResult.exitCode !== 0) {
-			throw new Error(
-				`Failed to install dependencies: ${installResult.exitCode}`,
-			);
+		if (verifyResult.exitCode !== 0) {
+			throw new Error("browserd.js not found after extraction");
 		}
 
-		// Install Playwright Chromium
-		const playwrightResult = await sandbox.runCommand("sh", [
+		// Environment setup matching Dockerfile.sandbox-node
+		const home = "/home/vercel-sandbox";
+		const envSetup = [
+			`export HOME=${home}`,
+			`export BUN_INSTALL=${home}/.bun`,
+			`export PLAYWRIGHT_BROWSERS_PATH=${home}/.cache/playwright-browsers`,
+			`export PATH=${home}/.bun/bin:${home}/.local/bin:$PATH`,
+		].join(" && ");
+
+		// Install Bun
+		const bunResult = await sandbox.runCommand("sh", [
 			"-c",
-			`cd ${workDir}/browserd && bunx playwright install chromium`,
+			`curl -fsSL https://bun.sh/install | bash 2>&1`,
 		]);
-		if (playwrightResult.exitCode !== 0) {
-			throw new Error(
-				`Failed to install Playwright: ${playwrightResult.exitCode}`,
-			);
+		if (bunResult.exitCode !== 0) {
+			const stdout = await bunResult.stdout();
+			throw new Error(`Failed to install Bun: exit ${bunResult.exitCode}\n${stdout}`);
+		}
+
+		// Install system deps (dnf) and rebrowser-playwright + chromium in one command
+		const setupResult = await sandbox.runCommand("sh", [
+			"-c",
+			`sudo dnf install -y nss nspr atk at-spi2-atk cups-libs libdrm libxkbcommon mesa-libgbm alsa-lib libXcomposite libXdamage libXfixes libXrandr pango cairo liberation-fonts mesa-libEGL gtk3 dbus-glib libXScrnSaver xorg-x11-server-Xvfb 2>&1 && ${envSetup} && mkdir -p ${home}/.cache && bun install -g rebrowser-playwright 2>&1 && bunx rebrowser-playwright-core install chromium 2>&1`,
+		]);
+		if (setupResult.exitCode !== 0) {
+			const stdout = await setupResult.stdout();
+			throw new Error(`Failed to setup browser: exit ${setupResult.exitCode}\n${stdout}`);
 		}
 
 		// Start browserd server in detached mode
@@ -229,7 +259,7 @@ export class VercelSandboxProvider implements SandboxProvider {
 			cmd: "sh",
 			args: [
 				"-c",
-				`cd ${workDir}/browserd && HEADLESS=${headless} PORT=${port} bun run src/server/index.ts`,
+				`${envSetup} && HEADLESS=${headless} PORT=${port} bun ${browserdPath} > /tmp/browserd.log 2>&1`,
 			],
 			detached: true,
 		});
@@ -237,6 +267,9 @@ export class VercelSandboxProvider implements SandboxProvider {
 
 	/**
 	 * Wait for browserd to be ready by polling the health endpoint
+	 *
+	 * Note: Vercel's proxy returns 200 with empty body when no server is listening,
+	 * so we must check the response body contains actual content.
 	 */
 	private async waitForReady(
 		sandboxId: string,
@@ -256,7 +289,12 @@ export class VercelSandboxProvider implements SandboxProvider {
 				});
 
 				if (response.ok) {
-					return true;
+					// Vercel returns 200 with empty body when no server is listening
+					// Check that we actually got content back
+					const text = await response.text();
+					if (text && text.includes("ready")) {
+						return true;
+					}
 				}
 			} catch {
 				// Server not ready yet

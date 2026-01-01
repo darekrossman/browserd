@@ -10,7 +10,6 @@ async function main() {
 	try {
 		console.log(`Sandbox ID: ${sandbox.id}`);
 		console.log(`Domain: ${sandbox.domain}`);
-		console.log(`Transport: ${sandbox.transport}`);
 
 		// Create session 1 - for bot detection testing (returns connected client)
 		console.log("\nCreating Session 1 (bot detector)...");
