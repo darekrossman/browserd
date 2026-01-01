@@ -1,0 +1,78 @@
+name: Publish to npm
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # Required for npm provenance
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Type check
+        run: bun run check-types
+
+      - name: Run unit tests
+        run: bun run test:unit
+
+      - name: Build SDK
+        run: bun run build:sdk
+
+      - name: Verify build artifacts
+        run: |
+          echo "Checking build output..."
+          ls -la dist/sdk/
+          ls -la dist/sdk/providers/ || true
+          echo "Checking for declaration files..."
+          find dist/sdk -name "*.d.ts" | head -10
+
+      - name: Publish to npm
+        run: bun publish --access public
+        env:
+          BUN_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # Optional: Create GitHub release assets
+  release-assets:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build SDK
+        run: bun run build:sdk
+
+      - name: Create tarball
+        run: |
+          cd dist
+          tar -czvf browserd-sdk-${{ github.ref_name }}.tar.gz sdk/
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/browserd-sdk-${{ github.ref_name }}.tar.gz

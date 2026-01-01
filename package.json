@@ -1,11 +1,45 @@
 {
 	"name": "browserd",
 	"version": "0.1.0",
+	"description": "Browser automation SDK with visual streaming and remote control",
 	"type": "module",
+	"main": "./dist/sdk/index.js",
+	"types": "./dist/sdk/index.d.ts",
 	"exports": {
-		".": "./src/index.ts",
-		"./sdk": "./src/sdk/index.ts"
+		".": {
+			"types": "./dist/sdk/index.d.ts",
+			"import": "./dist/sdk/index.js"
+		},
+		"./providers": {
+			"types": "./dist/sdk/providers/index.d.ts",
+			"import": "./dist/sdk/providers/index.js"
+		}
 	},
+	"files": [
+		"dist/sdk",
+		"README.md",
+		"USAGE.md",
+		"LICENSE"
+	],
+	"keywords": [
+		"browser",
+		"automation",
+		"playwright",
+		"puppeteer",
+		"chromium",
+		"sdk",
+		"remote-browser",
+		"web-scraping"
+	],
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/darekrossman/browserd.git"
+	},
+	"bugs": {
+		"url": "https://github.com/darekrossman/browserd/issues"
+	},
+	"homepage": "https://github.com/darekrossman/browserd#readme",
 	"scripts": {
 		"dev": "bun --watch run src/server/index.ts",
 		"start": "bun run src/server/index.ts",
@@ -30,7 +64,9 @@
 		"docker:test:integration": "docker run -i --rm --shm-size=1g -e HEADLESS=true -v $(pwd):/vercel/sandbox -w /vercel/sandbox browserd-sandbox bun test tests/integration/",
 		"docker:test:e2e": "docker run -i --rm --shm-size=1g -e HEADLESS=true -v $(pwd):/vercel/sandbox -w /vercel/sandbox browserd-sandbox bun test tests/e2e/",
 		"build:tarball": "./scripts/build-tarball.sh",
-		"build:binaries": "bun run scripts/build-binaries.ts"
+		"build:binaries": "bun run scripts/build-binaries.ts",
+		"build:sdk": "bun run scripts/build-sdk.ts",
+		"prepublishOnly": "bun run build:sdk"
 	},
 	"dependencies": {},
 	"devDependencies": {

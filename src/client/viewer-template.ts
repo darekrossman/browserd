@@ -238,8 +238,6 @@ export function generateViewerHTML(options: ViewerOptions = {}): string {
 				showStats
 					? `
       <div class="stats">
-        <div class="stat"><span class="label">FPS</span> <span class="value" id="fps">0</span></div>
-        <div class="stat"><span class="label">Latency</span> <span class="value" id="latency">0</span><span class="label">ms</span></div>
         <div class="stat"><span class="label">Size</span> <span class="value" id="size">1280x720</span></div>
       </div>
       `
@@ -267,8 +265,6 @@ export function generateViewerHTML(options: ViewerOptions = {}): string {
       const mainContainer = document.querySelector('.main');
       const statusDot = document.getElementById('status-dot');
       const statusText = document.getElementById('status-text');
-      ${showStats ? "const fpsEl = document.getElementById('fps');" : ""}
-      ${showStats ? "const latencyEl = document.getElementById('latency');" : ""}
       ${showStats ? "const sizeEl = document.getElementById('size');" : ""}
       ${showControls ? "const urlInput = document.getElementById('url');" : ""}
 
@@ -277,9 +273,6 @@ export function generateViewerHTML(options: ViewerOptions = {}): string {
       let eventSource = null;
       let transport = 'ws';  // 'ws' or 'sse'
       let connected = false;
-      let frameCount = 0;
-      let lastFpsUpdate = Date.now();
-      let lastPingTime = 0;
       let viewport = { w: 1280, h: 720, dpr: 1 };
 
       // Resize canvas display to fit available space while maintaining aspect ratio
@@ -455,7 +448,7 @@ export function generateViewerHTML(options: ViewerOptions = {}): string {
             renderFrame(msg);
             break;
           case 'pong':
-            ${showStats ? "latencyEl.textContent = Date.now() - msg.t;" : ""}
+            // Latency measurement received (not displayed)
             break;
           case 'event':
             handleEvent(msg);
@@ -480,15 +473,6 @@ export function generateViewerHTML(options: ViewerOptions = {}): string {
             resizeCanvasDisplay();
           }
           ctx.drawImage(img, 0, 0);
-
-          // Update FPS counter
-          frameCount++;
-          const now = Date.now();
-          if (now - lastFpsUpdate >= 1000) {
-            ${showStats ? "fpsEl.textContent = frameCount;" : ""}
-            frameCount = 0;
-            lastFpsUpdate = now;
-          }
         };
         img.src = 'data:image/jpeg;base64,' + frame.data;
       }

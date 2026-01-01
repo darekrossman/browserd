@@ -46,7 +46,6 @@ async function main() {
 		console.log("\n--- Sandbox created ---");
 		console.log(`ID: ${sandbox.id}`);
 		console.log(`Domain: ${sandbox.domain}`);
-		console.log(`WebSocket: ${sandbox.wsUrl}`);
 		console.log(`Status: ${sandbox.status}`);
 
 		console.log("\n--- Testing navigation ---");
@@ -58,9 +57,9 @@ async function main() {
 		// console.log(`Screenshot format: ${screenshot.format}`);
 		// console.log(`Screenshot size: ${screenshot.data.length} bytes (base64)`);
 
-		console.log("\n--- Cleanup ---");
-		await manager.destroy(sandbox.id);
-		console.log("Sandbox destroyed successfully");
+		// console.log("\n--- Cleanup ---");
+		// await manager.destroy(sandbox.id);
+		// console.log("Sandbox destroyed successfully");
 	} catch (err) {
 		console.error("\n--- Error ---");
 		console.error(err);

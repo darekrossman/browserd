@@ -516,6 +516,7 @@ export class SpritesSandboxProvider implements SandboxProvider {
 		).catch(() => ({ stdout: "", stderr: "", exitCode: 1 }));
 
 		if (!checkResult.stdout.includes("exists")) {
+			this.log("Installing system dependencies and Chromium...");
 			await this.installDeps(sprite);
 
 			// Create checkpoint after setup if enabled
@@ -553,11 +554,17 @@ export class SpritesSandboxProvider implements SandboxProvider {
 	 * Stop the browserd service on a sprite
 	 */
 	private async stopBrowserdService(sprite: SpriteWithUrl): Promise<void> {
-		// Use curl directly to avoid jq dependency in sprite-env services CLI
+		// Delete the service via API
 		await this.exec(
 			sprite,
 			"sprite-env curl -X DELETE /v1/services/browserd 2>/dev/null || true",
 		).catch(() => {});
+		// Kill any orphaned browserd processes
+		await this.exec(sprite, "pkill -f browserd.js 2>/dev/null || true").catch(
+			() => {},
+		);
+		// Give processes time to exit
+		await sleep(500);
 	}
 
 	/**
@@ -635,7 +642,8 @@ export class SpritesSandboxProvider implements SandboxProvider {
 
 		// Stop any existing unhealthy service
 		await this.stopBrowserdService(sprite);
-		await sleep(500);
+
+		this.log("Deploying browserd bundle...");
 
 		// Extract script: extract to temp, find browserd.js, move to /home/sprite
 		const extractScript = `
@@ -681,6 +689,8 @@ export class SpritesSandboxProvider implements SandboxProvider {
 				throw new Error(`Failed to deploy bundle: ${deployResult.stderr}`);
 			}
 		}
+
+		this.log("Starting browserd service...");
 
 		// Create browserd service using sprite-env curl (avoids jq dependency)
 		const serviceJson = this.headed
