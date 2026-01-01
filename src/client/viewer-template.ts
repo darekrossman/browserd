@@ -697,3 +697,359 @@ export function createViewerResponse(options?: ViewerOptions): Response {
 		},
 	});
 }
+
+export interface GridViewerOptions {
+	title?: string;
+}
+
+/**
+ * Generate the grid viewer HTML page showing all sessions
+ */
+export function generateGridViewerHTML(options: GridViewerOptions = {}): string {
+	const { title = "Browserd - All Sessions" } = options;
+
+	return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', 'Droid Sans Mono', 'Source Code Pro', monospace;
+      background: #0a0a0a;
+      color: #888;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      font-size: 12px;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 12px;
+      background: #0f0f0f;
+      border-bottom: 1px solid #1a1a1a;
+    }
+
+    .header h1 {
+      font-size: 11px;
+      font-weight: 500;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-left: auto;
+    }
+
+    .session-count {
+      font-size: 10px;
+      color: #666;
+    }
+
+    .main {
+      flex: 1;
+      padding: 16px;
+      overflow: auto;
+    }
+
+    .grid-container {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    }
+
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 50vh;
+      color: #555;
+    }
+
+    .empty-state h2 {
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 8px;
+    }
+
+    .empty-state p {
+      font-size: 11px;
+      color: #444;
+    }
+
+    .session-cell {
+      position: relative;
+      background: #111;
+      border: 1px solid #1a1a1a;
+      border-radius: 8px;
+      overflow: hidden;
+      cursor: pointer;
+      text-decoration: none;
+      display: block;
+      transition: border-color 0.15s, transform 0.15s;
+    }
+
+    .session-cell:hover {
+      border-color: #333;
+      transform: scale(1.01);
+    }
+
+    .session-cell:hover .session-label {
+      background: rgba(0, 0, 0, 0.85);
+    }
+
+    .canvas-wrapper {
+      aspect-ratio: 16/9;
+      background: #0a0a0a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .canvas-wrapper canvas {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+
+    .session-label {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 8px 12px;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: background 0.15s;
+    }
+
+    .session-id {
+      font-size: 10px;
+      color: #888;
+      font-family: inherit;
+    }
+
+    .session-status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #4a2c2c;
+    }
+
+    .status-dot.connected {
+      background: #2c4a2c;
+    }
+
+    .status-dot.connecting {
+      background: #4a3c2c;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.6; }
+      50% { opacity: 1; }
+    }
+
+    .loading-state {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: #444;
+      font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <h1>Browserd Sessions</h1>
+    <div class="header-right">
+      <span class="session-count" id="session-count">Loading...</span>
+    </div>
+  </header>
+
+  <main class="main">
+    <div class="grid-container" id="grid"></div>
+  </main>
+
+  <script>
+    (function() {
+      const grid = document.getElementById('grid');
+      const sessionCountEl = document.getElementById('session-count');
+
+      // Track sessions and their connections
+      const sessions = new Map(); // sessionId -> { eventSource, canvas, ctx }
+
+      // Fetch and update sessions
+      async function fetchSessions() {
+        try {
+          const response = await fetch('/api/sessions');
+          const data = await response.json();
+          return data.sessions || [];
+        } catch (err) {
+          console.error('Failed to fetch sessions:', err);
+          return [];
+        }
+      }
+
+      // Create session cell element
+      function createSessionCell(session) {
+        const cell = document.createElement('a');
+        cell.href = '/sessions/' + session.id + '/viewer';
+        cell.className = 'session-cell';
+        cell.id = 'cell-' + session.id;
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'canvas-wrapper';
+
+        const canvas = document.createElement('canvas');
+        canvas.width = session.viewport?.width || 1280;
+        canvas.height = session.viewport?.height || 720;
+        wrapper.appendChild(canvas);
+
+        const label = document.createElement('div');
+        label.className = 'session-label';
+        label.innerHTML = \`
+          <span class="session-id">\${session.id}</span>
+          <span class="session-status">
+            <span class="status-dot connecting" id="dot-\${session.id}"></span>
+          </span>
+        \`;
+
+        cell.appendChild(wrapper);
+        cell.appendChild(label);
+
+        return { cell, canvas };
+      }
+
+      // Connect to session stream
+      function connectToSession(sessionId, canvas) {
+        const ctx = canvas.getContext('2d');
+        const streamUrl = '/sessions/' + sessionId + '/stream';
+
+        const eventSource = new EventSource(streamUrl);
+
+        eventSource.onopen = () => {
+          const dot = document.getElementById('dot-' + sessionId);
+          if (dot) {
+            dot.className = 'status-dot connected';
+          }
+        };
+
+        eventSource.onerror = () => {
+          const dot = document.getElementById('dot-' + sessionId);
+          if (dot) {
+            dot.className = 'status-dot connecting';
+          }
+        };
+
+        eventSource.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'frame') {
+              const img = new Image();
+              img.onload = () => {
+                if (canvas.width !== msg.viewport.w || canvas.height !== msg.viewport.h) {
+                  canvas.width = msg.viewport.w;
+                  canvas.height = msg.viewport.h;
+                }
+                ctx.drawImage(img, 0, 0);
+              };
+              img.src = 'data:image/jpeg;base64,' + msg.data;
+            }
+          } catch (err) {
+            console.error('Failed to parse message:', err);
+          }
+        };
+
+        return eventSource;
+      }
+
+      // Update grid with sessions
+      async function updateGrid() {
+        const sessionList = await fetchSessions();
+        const currentIds = new Set(sessionList.map(s => s.id));
+
+        // Remove sessions that no longer exist
+        for (const [id, sessionData] of sessions) {
+          if (!currentIds.has(id)) {
+            sessionData.eventSource?.close();
+            const cell = document.getElementById('cell-' + id);
+            if (cell) cell.remove();
+            sessions.delete(id);
+          }
+        }
+
+        // Add new sessions
+        for (const session of sessionList) {
+          if (!sessions.has(session.id)) {
+            const { cell, canvas } = createSessionCell(session);
+            grid.appendChild(cell);
+            const eventSource = connectToSession(session.id, canvas);
+            sessions.set(session.id, { eventSource, canvas });
+          }
+        }
+
+        // Update count
+        sessionCountEl.textContent = sessions.size + ' session' + (sessions.size === 1 ? '' : 's');
+
+        // Show empty state if no sessions
+        if (sessions.size === 0 && !document.querySelector('.empty-state')) {
+          grid.innerHTML = \`
+            <div class="empty-state">
+              <h2>No Active Sessions</h2>
+              <p>Create a session via POST /api/sessions</p>
+            </div>
+          \`;
+        } else if (sessions.size > 0) {
+          const emptyState = grid.querySelector('.empty-state');
+          if (emptyState) emptyState.remove();
+        }
+      }
+
+      // Initial load
+      updateGrid();
+
+      // Poll for changes every 3 seconds
+      setInterval(updateGrid, 3000);
+    })();
+  </script>
+</body>
+</html>`;
+}
+
+/**
+ * Create Response with grid viewer HTML
+ */
+export function createGridViewerResponse(options?: GridViewerOptions): Response {
+	return new Response(generateGridViewerHTML(options), {
+		headers: {
+			"Content-Type": "text/html; charset=utf-8",
+			"Cache-Control": "no-cache",
+		},
+	});
+}

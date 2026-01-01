@@ -136,18 +136,36 @@ export class SandboxManager {
 			throw new BrowserdError("SANDBOX_NOT_FOUND", `Sandbox ${sandboxId} not found`);
 		}
 
-		const response = await fetch(`${managed.baseUrl}/api/sessions`, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				...(managed.sandbox.authToken && {
-					Authorization: `Bearer ${managed.sandbox.authToken}`,
-				}),
-			},
-			body: JSON.stringify(options ?? {}),
-		});
+		// Retry logic for transient proxy errors (502, 503, 504)
+		const maxRetries = 3;
+		const retryDelay = 1000;
+		let lastError: Error | null = null;
 
-		if (!response.ok) {
+		for (let attempt = 1; attempt <= maxRetries; attempt++) {
+			const response = await fetch(`${managed.baseUrl}/api/sessions`, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					...(managed.sandbox.authToken && {
+						Authorization: `Bearer ${managed.sandbox.authToken}`,
+					}),
+				},
+				body: JSON.stringify(options ?? {}),
+			});
+
+			if (response.ok) {
+				const sessionInfo: SessionInfo = await response.json();
+				return this.setupSessionClient(managed, sessionInfo);
+			}
+
+			// Check for retryable errors (proxy/gateway issues)
+			if ([502, 503, 504].includes(response.status) && attempt < maxRetries) {
+				lastError = new Error(`HTTP ${response.status}: ${response.statusText}`);
+				await new Promise((r) => setTimeout(r, retryDelay * attempt));
+				continue;
+			}
+
+			// Non-retryable error or last attempt
 			const error = await response.json().catch(() => ({ error: "Unknown error" }));
 			throw new BrowserdError(
 				"SESSION_ERROR",
@@ -155,10 +173,29 @@ export class SandboxManager {
 			);
 		}
 
-		const sessionInfo: SessionInfo = await response.json();
+		throw new BrowserdError(
+			"SESSION_ERROR",
+			`Failed to create session after ${maxRetries} attempts: ${lastError?.message}`,
+		);
+	}
 
-		// Create and connect client
+	/**
+	 * Set up a connected client for a session
+	 */
+	private async setupSessionClient(
+		managed: ManagedSandbox,
+		sessionInfo: SessionInfo,
+	): Promise<BrowserdClient> {
+
+		// Fix URLs to use sandbox's external base URL (server returns localhost URLs)
+		const wsBase = managed.baseUrl.replace(/^http/, "ws");
+		sessionInfo.wsUrl = `${wsBase}/sessions/${sessionInfo.id}/ws`;
+		sessionInfo.streamUrl = `${managed.baseUrl}/sessions/${sessionInfo.id}/stream`;
+		sessionInfo.inputUrl = `${managed.baseUrl}/sessions/${sessionInfo.id}/input`;
+		sessionInfo.viewerUrl = `${managed.baseUrl}/sessions/${sessionInfo.id}/viewer`;
+
 		const sessionUrl = managed.transport === "sse" ? sessionInfo.streamUrl : sessionInfo.wsUrl;
+
 		const client = new BrowserdClient({
 			url: sessionUrl,
 			transport: managed.transport,
@@ -220,23 +257,7 @@ export class SandboxManager {
 
 		// Get session info and create new connected client
 		const sessionInfo = await this.getSessionInfo(sandboxId, sessionId);
-
-		const sessionUrl = managed.transport === "sse" ? sessionInfo.streamUrl : sessionInfo.wsUrl;
-		const client = new BrowserdClient({
-			url: sessionUrl,
-			transport: managed.transport,
-			authToken: managed.sandbox.authToken,
-			sessionId: sessionInfo.id,
-			sessionInfo,
-			...this.clientOptions,
-		});
-
-		await client.connect();
-
-		// Cache the connected client
-		managed.clients.set(sessionId, client);
-
-		return client;
+		return this.setupSessionClient(managed, sessionInfo);
 	}
 
 	/**

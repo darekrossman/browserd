@@ -6,7 +6,7 @@
  */
 
 import type { ServerWebSocket } from "bun";
-import { createViewerResponse } from "../client/viewer-template";
+import { createGridViewerResponse, createViewerResponse } from "../client/viewer-template";
 import {
 	type InputMessage,
 	type ServerMessage,
@@ -129,95 +129,123 @@ function parseSessionPath(path: string): { sessionId: string; endpoint: string }
 
 /**
  * Create SSE stream response for a session
+ * Uses Bun's direct streaming with flush() for immediate delivery
  */
 function createSSEStreamResponse(sessionId: string): Response {
 	const clientId = generateSSEClientId();
-	const encoder = new TextEncoder();
+	let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+	let isCleanedUp = false;
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	let directController: any = null;
 
-	return new Response(
-		new ReadableStream({
-			start(controller) {
-				// Create client entry
-				const client: SSEClient = {
-					id: clientId,
-					sessionId,
-					controller,
-					send: (data: string) => {
-						try {
-							controller.enqueue(encoder.encode(`data: ${data}\n\n`));
-						} catch {
-							// Client disconnected, cleanup
-							sseClients.delete(clientId);
-							const sessionClients = sseClientsBySession.get(sessionId);
-							if (sessionClients) {
-								sessionClients.delete(clientId);
-								if (sessionClients.size === 0) {
-									sseClientsBySession.delete(sessionId);
-								}
-							}
-						}
-					},
-				};
+	const cleanup = () => {
+		if (isCleanedUp) return;
+		isCleanedUp = true;
+		if (heartbeatInterval) {
+			clearInterval(heartbeatInterval);
+			heartbeatInterval = null;
+		}
+		sseClients.delete(clientId);
+		const sessionClients = sseClientsBySession.get(sessionId);
+		if (sessionClients) {
+			sessionClients.delete(clientId);
+			if (sessionClients.size === 0) {
+				sseClientsBySession.delete(sessionId);
+			}
+		}
+	};
 
-				// Register client
-				sseClients.set(clientId, client);
-				if (!sseClientsBySession.has(sessionId)) {
-					sseClientsBySession.set(sessionId, new Set());
-				}
-				sseClientsBySession.get(sessionId)!.add(clientId);
+	// Use Bun's direct stream type for immediate flushing
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const stream = new ReadableStream({
+		type: "direct" as any,
+		async pull(controller: any) {
+			directController = controller;
 
-				console.log(
-					`[sse] Client ${clientId} connected to session ${sessionId} (${sseClients.size} total)`,
-				);
-
-				// Send connected event
-				controller.enqueue(
-					encoder.encode(
-						`event: connected\ndata: ${JSON.stringify({ clientId, sessionId })}\n\n`,
-					),
-				);
-
-				// Send viewport info if available
-				const viewport = wsHandler?.getSessionViewport(sessionId);
-				if (viewport) {
-					controller.enqueue(
-						encoder.encode(
-							`data: ${JSON.stringify({ type: "event", event: "ready", data: { viewport } })}\n\n`,
-						),
-					);
-				}
-
-				// Send last frame if available for quick preview
-				const lastFrame = wsHandler?.getSessionLastFrame(sessionId);
-				if (lastFrame) {
-					controller.enqueue(
-						encoder.encode(`data: ${JSON.stringify(lastFrame)}\n\n`),
-					);
-				}
-			},
-			cancel() {
-				sseClients.delete(clientId);
-				const sessionClients = sseClientsBySession.get(sessionId);
-				if (sessionClients) {
-					sessionClients.delete(clientId);
-					if (sessionClients.size === 0) {
-						sseClientsBySession.delete(sessionId);
+			// Create client entry with direct write + flush
+			const client: SSEClient = {
+				id: clientId,
+				sessionId,
+				controller: controller as unknown as ReadableStreamDefaultController<Uint8Array>,
+				send: (data: string) => {
+					if (isCleanedUp || !directController) return;
+					try {
+						directController.write(`data: ${data}\n\n`);
+						directController.flush();
+					} catch {
+						cleanup();
 					}
+				},
+			};
+
+			// Register client
+			sseClients.set(clientId, client);
+			if (!sseClientsBySession.has(sessionId)) {
+				sseClientsBySession.set(sessionId, new Set());
+			}
+			sseClientsBySession.get(sessionId)!.add(clientId);
+
+			console.log(
+				`[sse] Client ${clientId} connected to session ${sessionId} (${sseClients.size} total)`,
+			);
+
+			// Send connected event
+			controller.write(`event: connected\ndata: ${JSON.stringify({ clientId, sessionId })}\n\n`);
+			controller.flush();
+
+			// Send viewport info if available
+			const viewport = wsHandler?.getSessionViewport(sessionId);
+			if (viewport) {
+				controller.write(`data: ${JSON.stringify({ type: "event", event: "ready", data: { viewport } })}\n\n`);
+				controller.flush();
+			}
+
+			// Send last frame if available for quick preview
+			const lastFrame = wsHandler?.getSessionLastFrame(sessionId);
+			if (lastFrame) {
+				controller.write(`data: ${JSON.stringify(lastFrame)}\n\n`);
+				controller.flush();
+			}
+
+			// Start heartbeat to keep connection alive through proxies
+			heartbeatInterval = setInterval(() => {
+				if (isCleanedUp || !directController) return;
+				try {
+					directController.write(`: heartbeat ${Date.now()}\n\n`);
+					directController.flush();
+				} catch {
+					cleanup();
 				}
-				console.log(
-					`[sse] Client ${clientId} disconnected from session ${sessionId} (${sseClients.size} remaining)`,
-				);
-			},
-		}),
+			}, 15000);
+
+			// Keep the stream open - return a promise that never resolves
+			// The stream will be closed when the client disconnects
+			return new Promise<void>(() => {});
+		},
+	});
+
+	// Handle stream close
+	stream.cancel = () => {
+		console.log(
+			`[sse] Client ${clientId} disconnected from session ${sessionId} (${sseClients.size} remaining)`,
+		);
+		cleanup();
+		return Promise.resolve();
+	};
+
+	return new Response(stream,
 		{
 			headers: {
-				"Content-Type": "text/event-stream",
-				"Cache-Control": "no-cache, no-transform",
-				Connection: "keep-alive",
+				"Content-Type": "text/event-stream; charset=utf-8",
+				"Cache-Control": "no-cache, no-store, no-transform, must-revalidate",
 				"Access-Control-Allow-Origin": "*",
-				// Headers to disable proxy buffering (Nginx, Cloudflare, etc.)
+				// Prevent any compression - can break SSE over HTTP/2
+				"Content-Encoding": "identity",
+				// Disable proxy buffering (various proxies)
 				"X-Accel-Buffering": "no",
 				"X-Content-Type-Options": "nosniff",
+				// Fly.io specific - disable response buffering
+				"Fly-Force-Instance-Id": "true",
 			},
 		},
 	);
@@ -458,6 +486,10 @@ async function handleRequest(
 		});
 	}
 
+	// Grid viewer for all sessions: /sessions/all
+	if (path === "/sessions/all") {
+		return createGridViewerResponse();
+	}
 
 	// Health endpoints
 	if (path === "/health" || path === "/healthz") {

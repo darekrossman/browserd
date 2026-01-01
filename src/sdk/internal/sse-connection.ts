@@ -155,6 +155,7 @@ export class SSEConnectionManager {
 
 	/**
 	 * Connect to the SSE stream using fetch
+	 * Includes retry logic for transient proxy errors (502, 503, 504)
 	 */
 	async connect(): Promise<void> {
 		// Already connected or connecting
@@ -178,35 +179,66 @@ export class SSEConnectionManager {
 			}, this.timeout);
 
 			const doConnect = async () => {
-				const response = await fetch(this.streamUrl, {
-					method: "GET",
-					headers: this.getHeaders({
-						Accept: "text/event-stream",
-					}),
-					signal: this.abortController!.signal,
-				});
+				// Retry logic for transient proxy errors
+				const maxRetries = 3;
+				const retryDelay = 500;
+				let lastError: Error | null = null;
 
-				if (!response.ok) {
-					throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+				for (let attempt = 1; attempt <= maxRetries; attempt++) {
+					try {
+						const response = await fetch(this.streamUrl, {
+							method: "GET",
+							headers: this.getHeaders({
+								Accept: "text/event-stream",
+							}),
+							signal: this.abortController!.signal,
+						});
+
+						// Check for retryable errors (proxy/gateway issues)
+						if ([502, 503, 504].includes(response.status) && attempt < maxRetries) {
+							lastError = new Error(`HTTP ${response.status}: ${response.statusText}`);
+							await new Promise((r) => setTimeout(r, retryDelay * attempt));
+							continue;
+						}
+
+						if (!response.ok) {
+							throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+						}
+
+						if (!response.body) {
+							throw new Error("Response body is null");
+						}
+
+						// Start reading the stream
+						this.streamReader = response.body.getReader();
+						const decoder = new TextDecoder();
+						const buffer = "";
+
+						// Mark as connected once we start receiving data
+						clearTimeout(timeoutId);
+						this.reconnectAttempts = 0;
+						this.setState("connected");
+						resolve();
+
+						// Process stream in background
+						this.processStream(decoder, buffer);
+						return;
+					} catch (err) {
+						// Re-throw non-retryable errors immediately
+						if (err instanceof Error && err.name === "AbortError") {
+							throw err;
+						}
+						// For other errors, store and retry if attempts remain
+						lastError = err instanceof Error ? err : new Error(String(err));
+						if (attempt < maxRetries) {
+							await new Promise((r) => setTimeout(r, retryDelay * attempt));
+							continue;
+						}
+					}
 				}
 
-				if (!response.body) {
-					throw new Error("Response body is null");
-				}
-
-				// Start reading the stream
-				this.streamReader = response.body.getReader();
-				const decoder = new TextDecoder();
-				const buffer = "";
-
-				// Mark as connected once we start receiving data
-				clearTimeout(timeoutId);
-				this.reconnectAttempts = 0;
-				this.setState("connected");
-				resolve();
-
-				// Process stream in background
-				this.processStream(decoder, buffer);
+				// All retries exhausted
+				throw lastError || new Error("Connection failed after retries");
 			};
 
 			doConnect().catch((err) => {

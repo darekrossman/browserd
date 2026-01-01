@@ -39,11 +39,9 @@ async function main() {
 		debug: true,
 	});
 
-	const {
-		sandbox,
-		createSession,
-		listSessions,
-	} = await createClient({ provider });
+	const { sandbox, createSession, listSessions } = await createClient({
+		provider,
+	});
 
 	try {
 		console.log(`Sandbox ID: ${sandbox.id}`);
@@ -79,73 +77,73 @@ async function main() {
 			}),
 		]);
 
-		const elapsed = Date.now() - startTime;
-		console.log(`\nAll navigations completed in ${elapsed}ms`);
+		// const elapsed = Date.now() - startTime;
+		// console.log(`\nAll navigations completed in ${elapsed}ms`);
 
-		// Get titles from each session
-		const [title1, title2] = await Promise.all([
-			client1.evaluate<string>("document.title"),
-			client2.evaluate<string>("document.title"),
-		]);
+		// // Get titles from each session
+		// const [title1, title2] = await Promise.all([
+		// 	client1.evaluate<string>("document.title"),
+		// 	client2.evaluate<string>("document.title"),
+		// ]);
 
-		console.log(`\nSession titles (should be different):`);
-		console.log(`  Session 1: "${title1}"`);
-		console.log(`  Session 2: "${title2}"`);
+		// console.log(`\nSession titles (should be different):`);
+		// console.log(`  Session 1: "${title1}"`);
+		// console.log(`  Session 2: "${title2}"`);
 
-		// Get URLs from each session
-		const [url1, url2] = await Promise.all([
-			client1.evaluate<string>("window.location.href"),
-			client2.evaluate<string>("window.location.href"),
-		]);
+		// // Get URLs from each session
+		// const [url1, url2] = await Promise.all([
+		// 	client1.evaluate<string>("window.location.href"),
+		// 	client2.evaluate<string>("window.location.href"),
+		// ]);
 
-		console.log(`\nSession URLs:`);
-		console.log(`  Session 1: ${url1}`);
-		console.log(`  Session 2: ${url2}`);
+		// console.log(`\nSession URLs:`);
+		// console.log(`  Session 1: ${url1}`);
+		// console.log(`  Session 2: ${url2}`);
 
-		// List all sessions
-		const { sessions, count, maxSessions } = await listSessions();
-		console.log(`\nActive sessions: ${count}/${maxSessions}`);
+		// // List all sessions
+		// const { sessions, count, maxSessions } = await listSessions();
+		// console.log(`\nActive sessions: ${count}/${maxSessions}`);
 
-		for (const sess of sessions) {
-			console.log(`\n  Session: ${sess.id}`);
-			console.log(`    Status: ${sess.status}`);
-			console.log(
-				`    Viewport: ${sess.viewport.width}x${sess.viewport.height}`,
-			);
-			console.log(`    Clients: ${sess.clientCount ?? 0}`);
-			console.log(`    URL: ${sess.url ?? "N/A"}`);
-		}
+		// for (const sess of sessions) {
+		// 	console.log(`\n  Session: ${sess.id}`);
+		// 	console.log(`    Status: ${sess.status}`);
+		// 	console.log(
+		// 		`    Viewport: ${sess.viewport.width}x${sess.viewport.height}`,
+		// 	);
+		// 	console.log(`    Clients: ${sess.clientCount ?? 0}`);
+		// 	console.log(`    URL: ${sess.url ?? "N/A"}`);
+		// }
 
-		// Type in Google search (Session 2) while Session 1 stays on bot detector
-		try {
-			await client2.click('textarea[name="q"]', { timeout: 5000 });
-			await client2.type('textarea[name="q"]', "browserd multi-session test");
-		} catch (err) {
-			console.log("  - Google search input not found (may have different UI)");
-		}
+		// // Type in Google search (Session 2) while Session 1 stays on bot detector
+		// try {
+		// 	await client2.click('textarea[name="q"]', { timeout: 5000 });
+		// 	await client2.type('textarea[name="q"]', "browserd multi-session test");
+		// } catch (err) {
+		// 	console.log("  - Google search input not found (may have different UI)");
+		// }
 
-		// Take screenshots from each session
-		const [ss1, ss2] = await Promise.all([
-			client1.screenshot({ type: "jpeg", quality: 80 }),
-			client2.screenshot({ type: "jpeg", quality: 80 }),
-		]);
+		// // Take screenshots from each session
+		// const [ss1, ss2] = await Promise.all([
+		// 	client1.screenshot({ type: "jpeg", quality: 80 }),
+		// 	client2.screenshot({ type: "jpeg", quality: 80 }),
+		// ]);
 
-		console.log(
-			`  Session 1 screenshot: ${ss1.format}, ${Math.round(ss1.data.length / 1024)}KB`,
-		);
-		console.log(
-			`  Session 2 screenshot: ${ss2.format}, ${Math.round(ss2.data.length / 1024)}KB`,
-		);
+		// console.log(
+		// 	`  Session 1 screenshot: ${ss1.format}, ${Math.round(ss1.data.length / 1024)}KB`,
+		// );
+		// console.log(
+		// 	`  Session 2 screenshot: ${ss2.format}, ${Math.round(ss2.data.length / 1024)}KB`,
+		// );
 
-		// Close session clients - close() destroys sessions automatically
-		await client1.close();
-		await client2.close();
+		// // Close session clients - close() destroys sessions automatically
+		// await client1.close();
+		// await client2.close();
 
-		// List remaining sessions (should be 0)
-		const remaining = await listSessions();
-		console.log(`\nRemaining sessions: ${remaining.count}`);
+		// // List remaining sessions (should be 0)
+		// const remaining = await listSessions();
+		// console.log(`\nRemaining sessions: ${remaining.count}`);
 
-		process.exit(0);
+		// process.exit(0);
 	} catch (err) {
 		console.error("\n--- Error ---");
 		console.error(err);
