@@ -66,7 +66,7 @@ export class VercelSandboxProvider implements SandboxProvider {
 
 		const sandboxId = sandbox.sandboxId;
 		const domain = sandbox.domain(port);
-		const wsUrl = domain.replace("https://", "wss://") + "/ws";
+		const wsUrl = `${domain.replace("https://", "wss://")}/ws`;
 
 		// Create initial sandbox info
 		const info: SandboxInfo = {
@@ -84,13 +84,10 @@ export class VercelSandboxProvider implements SandboxProvider {
 			const installScript = `${this.blobBaseUrl}/install.sh`;
 			const tarballUrl = `${this.blobBaseUrl}/browserd.tar.gz`;
 
-			const installResult = await sandbox.runCommand(
-				"sh",
-				[
-					"-c",
-					`curl -fsSL "${installScript}" | TARBALL_URL="${tarballUrl}" PORT="${port}" sh`,
-				],
-			);
+			const installResult = await sandbox.runCommand("sh", [
+				"-c",
+				`curl -fsSL "${installScript}" | TARBALL_URL="${tarballUrl}" PORT="${port}" sh`,
+			]);
 
 			if (installResult.exitCode !== 0) {
 				throw new Error(

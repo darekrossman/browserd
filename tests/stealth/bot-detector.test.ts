@@ -11,7 +11,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { BrowserdClient, BrowserdError } from "../../src/sdk";
+import { BrowserdClient } from "../../src/sdk";
 
 const SERVER_URL = process.env.BROWSERD_URL || "ws://localhost:3000/ws";
 

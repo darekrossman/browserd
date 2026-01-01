@@ -131,38 +131,35 @@ describe("SDK Resilience", () => {
 	});
 
 	describe("Connection State Tracking", () => {
-		test.skipIf(!runTests)(
-			"tracks connection state transitions",
-			async () => {
-				const client = new BrowserdClient({
-					url: SERVER_URL,
-					timeout: 10000,
-					autoReconnect: false,
-				});
+		test.skipIf(!runTests)("tracks connection state transitions", async () => {
+			const client = new BrowserdClient({
+				url: SERVER_URL,
+				timeout: 10000,
+				autoReconnect: false,
+			});
 
-				const states: string[] = [];
-				client.onConnectionStateChange((state) => {
-					states.push(state);
-				});
+			const states: string[] = [];
+			client.onConnectionStateChange((state) => {
+				states.push(state);
+			});
 
-				try {
-					expect(client.getConnectionState()).toBe("disconnected");
+			try {
+				expect(client.getConnectionState()).toBe("disconnected");
 
-					await client.connect();
-					expect(client.getConnectionState()).toBe("connected");
+				await client.connect();
+				expect(client.getConnectionState()).toBe("connected");
 
-					await client.close();
-					expect(client.getConnectionState()).toBe("disconnected");
+				await client.close();
+				expect(client.getConnectionState()).toBe("disconnected");
 
-					// Verify all expected transitions occurred
-					expect(states).toContain("connecting");
-					expect(states).toContain("connected");
-					expect(states).toContain("disconnected");
-				} finally {
-					await client.close().catch(() => {});
-				}
-			},
-		);
+				// Verify all expected transitions occurred
+				expect(states).toContain("connecting");
+				expect(states).toContain("connected");
+				expect(states).toContain("disconnected");
+			} finally {
+				await client.close().catch(() => {});
+			}
+		});
 
 		test.skipIf(!runTests)(
 			"throws NOT_CONNECTED after disconnect",

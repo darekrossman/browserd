@@ -69,10 +69,12 @@ export class SSEConnectionManager {
 	/**
 	 * Get headers for requests, including auth if configured
 	 */
-	private getHeaders(additionalHeaders?: Record<string, string>): Record<string, string> {
+	private getHeaders(
+		additionalHeaders?: Record<string, string>,
+	): Record<string, string> {
 		const headers: Record<string, string> = { ...additionalHeaders };
 		if (this.authToken) {
-			headers["Authorization"] = `Bearer ${this.authToken}`;
+			headers.Authorization = `Bearer ${this.authToken}`;
 		}
 		return headers;
 	}
@@ -107,7 +109,7 @@ export class SSEConnectionManager {
 		this.setState("connecting");
 		this.abortController = new AbortController();
 
-		this.connectPromise = new Promise<void>(async (resolve, reject) => {
+		this.connectPromise = new Promise<void>((resolve, reject) => {
 			const timeoutId = setTimeout(() => {
 				this.cleanup();
 				const error = BrowserdError.connectionTimeout(this.timeout);
@@ -115,7 +117,7 @@ export class SSEConnectionManager {
 				reject(error);
 			}, this.timeout);
 
-			try {
+			const doConnect = async () => {
 				const streamUrl = `${this.baseUrl}/stream`;
 				const response = await fetch(streamUrl, {
 					method: "GET",
@@ -136,7 +138,7 @@ export class SSEConnectionManager {
 				// Start reading the stream
 				this.streamReader = response.body.getReader();
 				const decoder = new TextDecoder();
-				let buffer = "";
+				const buffer = "";
 
 				// Mark as connected once we start receiving data
 				clearTimeout(timeoutId);
@@ -146,12 +148,15 @@ export class SSEConnectionManager {
 
 				// Process stream in background
 				this.processStream(decoder, buffer);
-			} catch (err) {
+			};
+
+			doConnect().catch((err) => {
 				clearTimeout(timeoutId);
 
 				if (err instanceof Error && err.name === "AbortError") {
 					// Connection was intentionally closed
 					this.setState("disconnected");
+					resolve(); // Resolve instead of leaving hanging
 					return;
 				}
 
@@ -162,7 +167,7 @@ export class SSEConnectionManager {
 				this.handleError(error);
 				this.setState("disconnected");
 				reject(error);
-			}
+			});
 		});
 
 		try {
@@ -239,9 +244,7 @@ export class SSEConnectionManager {
 				this.attemptReconnect();
 			} else {
 				this.setState("disconnected");
-				this.handleError(
-					err instanceof Error ? err : new Error(String(err)),
-				);
+				this.handleError(err instanceof Error ? err : new Error(String(err)));
 			}
 		}
 	}

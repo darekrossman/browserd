@@ -58,9 +58,9 @@ async function main() {
 		// console.log(`Screenshot format: ${screenshot.format}`);
 		// console.log(`Screenshot size: ${screenshot.data.length} bytes (base64)`);
 
-		// console.log("\n--- Cleanup ---");
+		console.log("\n--- Cleanup ---");
 		await manager.destroy(sandbox.id);
-		// console.log("Sandbox destroyed successfully");
+		console.log("Sandbox destroyed successfully");
 	} catch (err) {
 		console.error("\n--- Error ---");
 		console.error(err);

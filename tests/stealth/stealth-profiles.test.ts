@@ -11,12 +11,12 @@
  * - Playwright Chromium browser installed
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
 	type BrowserConfig,
 	BrowserManager,
 } from "../../src/server/browser-manager";
-import type { ProfileName, StealthConfig } from "../../src/stealth";
+import type { StealthConfig } from "../../src/stealth";
 import { hasBrowserSupport, sleep } from "../helpers/setup";
 
 const runTests = hasBrowserSupport();

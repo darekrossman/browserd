@@ -98,10 +98,10 @@ The provider requires the `sprite` CLI for WebSocket connectivity. Check depende
 import { SpritesSandboxProvider } from 'browserd/sdk';
 
 // Check if all dependencies are available
-const deps = await SpritesSandboxProvider.checkDependencies();
-if (!deps.available) {
-  console.error(deps.message);
-  console.log(SpritesSandboxProvider.getInstallInstructions());
+const { available, message } = await SpritesSandboxProvider.checkDependencies();
+if (!available) {
+  console.error(message);
+  console.log('See https://docs.sprites.dev for installation instructions');
   process.exit(1);
 }
 

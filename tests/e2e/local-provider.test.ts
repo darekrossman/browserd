@@ -7,7 +7,14 @@
  * Run with: bun test tests/e2e/local-provider.test.ts
  */
 
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import {
+	afterAll,
+	afterEach,
+	beforeAll,
+	describe,
+	expect,
+	test,
+} from "bun:test";
 import { spawnSync } from "node:child_process";
 import { LocalSandboxProvider } from "../../src/sdk/providers/local";
 import { SandboxManager } from "../../src/sdk/sandbox-manager";

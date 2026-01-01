@@ -13,7 +13,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Subprocess } from "bun";
-import { BrowserdClient, BrowserdError } from "../../src/sdk";
+import { BrowserdClient } from "../../src/sdk";
 import { hasBrowserSupport, sleep } from "../helpers/setup";
 
 const SERVER_PORT = 3099;
@@ -135,21 +135,18 @@ describe("SDK E2E", () => {
 			await client.click("#btn");
 		});
 
-		test.skipIf(!runTests)(
-			"fills and types into form fields",
-			async () => {
-				const html = encodeURIComponent(
-					'<html><body><input id="name" type="text"><input id="email" type="email"></body></html>',
-				);
-				await client.navigate(`data:text/html,${html}`);
+		test.skipIf(!runTests)("fills and types into form fields", async () => {
+			const html = encodeURIComponent(
+				'<html><body><input id="name" type="text"><input id="email" type="email"></body></html>',
+			);
+			await client.navigate(`data:text/html,${html}`);
 
-				await client.waitForSelector("#name", { timeout: 5000 });
-				await client.fill("#name", "Test User");
+			await client.waitForSelector("#name", { timeout: 5000 });
+			await client.fill("#name", "Test User");
 
-				await client.click("#email");
-				await client.type("#email", "test@example.com", { delay: 10 });
-			},
-		);
+			await client.click("#email");
+			await client.type("#email", "test@example.com", { delay: 10 });
+		});
 
 		test.skipIf(!runTests)("hovers over element", async () => {
 			await client.hover("#name");

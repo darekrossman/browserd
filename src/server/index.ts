@@ -350,7 +350,9 @@ async function main(): Promise<void> {
 		console.log(`[browserd] Server listening on http://${HOST}:${PORT}`);
 		console.log(`[browserd] Viewer available at http://${HOST}:${PORT}/`);
 		console.log(`[browserd] WebSocket endpoint: ws://${HOST}:${PORT}/ws`);
-		console.log(`[browserd] SSE stream endpoint: http://${HOST}:${PORT}/stream`);
+		console.log(
+			`[browserd] SSE stream endpoint: http://${HOST}:${PORT}/stream`,
+		);
 		console.log(`[browserd] HTTP input endpoint: http://${HOST}:${PORT}/input`);
 	} catch (error) {
 		console.error("[browserd] Failed to start:", error);

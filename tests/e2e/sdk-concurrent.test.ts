@@ -11,7 +11,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Subprocess } from "bun";
-import { BrowserdClient, BrowserdError } from "../../src/sdk";
+import { BrowserdClient } from "../../src/sdk";
 import { hasBrowserSupport, sleep } from "../helpers/setup";
 
 const SERVER_PORT = 3098;
