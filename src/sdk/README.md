@@ -19,6 +19,7 @@ A TypeScript SDK for browser automation with visual streaming and remote control
 - [Error Handling](#error-handling)
 - [Transport Options](#transport-options)
 - [TypeScript Types](#typescript-types)
+- [AI SDK Integration](#ai-sdk-integration)
 
 ---
 
@@ -683,6 +684,84 @@ import type {
   SpritesSandboxProviderOptions,
 } from "browserd";
 ```
+
+---
+
+## AI SDK Integration
+
+The `browserd/ai` module provides a tool for the [Vercel AI SDK](https://ai-sdk.dev) that enables AI agents to control browsers.
+
+### Installation
+
+```bash
+# Install AI SDK dependencies
+bun add ai @ai-sdk/openai zod
+```
+
+### Quick Start
+
+```typescript
+import { generateText } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { createClient, LocalSandboxProvider } from "browserd";
+import { createBrowserTool } from "browserd/ai";
+
+// Create sandbox and session
+const { sandbox, manager, createSession } = await createClient({
+  provider: new LocalSandboxProvider(),
+});
+
+const browser = await createSession();
+
+// Create the AI browser tool
+const browserTool = createBrowserTool({ client: browser });
+
+// Use with AI SDK
+const { text } = await generateText({
+  model: openai("gpt-4o"),
+  tools: { browser: browserTool },
+  maxSteps: 10,
+  prompt: "Go to Hacker News and find the top story title",
+});
+
+console.log(text);
+
+// Cleanup
+await browser.close();
+await manager.destroy(sandbox.id);
+```
+
+### Supported Operations
+
+The AI browser tool supports all standard browser operations:
+
+| Operation | Description |
+|-----------|-------------|
+| `navigate` | Go to a URL |
+| `click` | Click on an element |
+| `dblclick` | Double-click on an element |
+| `hover` | Hover over an element |
+| `type` | Type text character by character |
+| `fill` | Fill a form field (clears existing value) |
+| `press` | Press a key or key combination |
+| `waitForSelector` | Wait for element state |
+| `evaluate` | Execute JavaScript in page context |
+| `screenshot` | Capture page screenshot |
+| `setViewport` | Change viewport dimensions |
+| `goBack` / `goForward` / `reload` | Browser navigation |
+
+### Options
+
+```typescript
+const browserTool = createBrowserTool({
+  client: browser,        // Required: connected BrowserdClient
+  defaultTimeout: 30000,  // Optional: default timeout for operations (ms)
+});
+```
+
+### Example
+
+See [`examples/ai-browser-tool.ts`](../../examples/ai-browser-tool.ts) for a complete working example.
 
 ---
 

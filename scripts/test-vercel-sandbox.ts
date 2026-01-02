@@ -13,9 +13,10 @@ async function main() {
 	const provider = new VercelSandboxProvider({
 		sandboxId,
 		devMode,
+		defaultTimeout: 60 * 60000, // 1 hour
 	});
 
-	const { sandbox, createSession, listSessions } = await createClient({
+	const { sandbox, createSession } = await createClient({
 		provider,
 	});
 
@@ -24,34 +25,35 @@ async function main() {
 		console.log(`Domain: ${sandbox.domain}`);
 		console.log(`View All Sessions: ${sandbox.domain}/sessions/all`);
 
-		// Create session 1 - for bot detection testing (returns connected client)
-		console.log("\nCreating Session 1 (bot detector)...");
-		const client1 = await createSession({
-			viewport: { width: 1920, height: 1080 },
-		});
-		console.log(`Session 1 ID: ${client1.sessionId}`);
-		console.log(`Session 1 Viewer URL: ${client1.sessionInfo?.viewerUrl}`);
+		// const urls = [
+		// 	"https://bot-detector.rebrowser.net",
+		// 	"https://github.com",
+		// 	"https://news.ycombinator.com",
+		// 	"https://vercel.com",
+		// 	"https://vercel.com/docs/vercel-sandbox",
+		// 	"https://bun.com/docs",
+		// 	"https://gemini.google.com/app",
+		// 	"https://www.anthropic.com/",
+		// 	"https://openai.com/",
+		// ];
 
-		// Create session 2 - for search testing (returns connected client)
-		console.log("\nCreating Session 2 (search)...");
-		const client2 = await createSession({
-			viewport: { width: 1280, height: 720 },
-		});
-		console.log(`Session 2 ID: ${client2.sessionId}`);
-		console.log(`Session 2 Viewer URL: ${client2.sessionInfo?.viewerUrl}`);
+		// const viewport = { width: 1920, height: 1080 };
 
-		// Navigate sessions to different pages (in parallel)
-		const startTime = Date.now();
+		// const clients = await Promise.all(
+		// 	urls.map(() => createSession({ viewport })),
+		// );
 
-		// Navigate all sessions concurrently
-		await Promise.all([
-			client1.navigate("https://bot-detector.rebrowser.net/").then(() => {
-				console.log("  - Session 1: Bot detector loaded");
-			}),
-			client2.navigate("https://www.google.com").then(() => {
-				console.log("  - Session 2: Google loaded");
-			}),
-		]);
+		// // Navigate all sessions concurrently without logging
+		// await Promise.all(
+		// 	clients.map((client, index) => client.navigate(urls[index])),
+		// );
+
+		// // Log all viewer URLs at the end
+		// console.log("\n--- Viewer URLs ---");
+		// clients.forEach((client, index) => {
+		// 	console.log(`${index + 1}. ${urls[index]}`);
+		// 	console.log(`   ${client.sessionInfo?.viewerUrl}`);
+		// });
 
 		process.exit(0);
 	} catch (err) {

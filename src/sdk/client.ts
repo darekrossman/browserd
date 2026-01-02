@@ -520,6 +520,7 @@ export class BrowserdClient {
 	 *   viewport: { width: 1920, height: 1080 }
 	 * });
 	 * const sessionClient = await client.getSessionClient(session.id);
+	 * await sessionClient.connect();
 	 * await sessionClient.navigate("https://example.com");
 	 * ```
 	 */

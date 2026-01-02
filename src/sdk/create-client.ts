@@ -38,26 +38,21 @@ export interface CreateClientOptions extends SandboxManagerOptions {
  *
  * @example
  * ```typescript
- * import { createClient, SpritesSandboxProvider } from '@repo/browserd/sdk';
+ * import { createClient, SpritesSandboxProvider } from "browserd";
  *
- * const { sandbox, manager, createSession, getSessionClient } = await createClient({
- *   provider: new SpritesSandboxProvider({ token: 'your-token' }),
+ * const { sandbox, manager, createSession, destroySession } = await createClient({
+ *   provider: new SpritesSandboxProvider({ token: "your-token" }),
  * });
  *
- * // Create a browser session
- * const session = await createSession();
- *
- * // Get a connected client for the session
- * const browser = await getSessionClient(session.id);
- * await browser.connect();
+ * // createSession() returns an already-connected BrowserdClient
+ * const browser = await createSession();
  *
  * // Now you can interact with the browser
- * await browser.navigate('https://example.com');
- * const title = await browser.evaluate('document.title');
+ * await browser.navigate("https://example.com");
+ * const title = await browser.evaluate("document.title");
  *
  * // Cleanup when done
  * await browser.close();
- * await destroySession(session.id);
  * await manager.destroy(sandbox.id);
  * ```
  *

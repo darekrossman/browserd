@@ -70,14 +70,10 @@ export class SandboxManager {
 	 *
 	 * @example
 	 * ```typescript
-	 * const { sandbox, createSession, getSessionClient } = await manager.create();
+	 * const { sandbox, createSession } = await manager.create();
 	 *
-	 * // Create a browser session
-	 * const session = await createSession({ viewport: { width: 1920, height: 1080 } });
-	 *
-	 * // Get a connected client for that session
-	 * const browser = await getSessionClient(session.id);
-	 * await browser.connect();
+	 * // createSession() returns an already-connected BrowserdClient
+	 * const browser = await createSession({ viewport: { width: 1920, height: 1080 } });
 	 *
 	 * // Use the browser
 	 * await browser.navigate("https://example.com");

@@ -14,13 +14,20 @@ const projectRoot = path.join(import.meta.dir, "..");
 const distDir = path.join(projectRoot, "dist", "sdk");
 
 // Entrypoints
-const entrypoints = ["src/sdk/index.ts", "src/sdk/providers/index.ts"];
+const entrypoints = [
+	"src/sdk/index.ts",
+	"src/sdk/providers/index.ts",
+	"src/sdk/ai/index.ts",
+];
 
 // External dependencies (not bundled)
 const external = [
 	// Optional provider dependencies
 	"@vercel/sandbox",
 	"@fly/sprites",
+	// AI SDK dependencies (peer deps)
+	"ai",
+	"zod",
 ];
 
 console.log("\x1b[36m🔨 Building browserd SDK...\x1b[0m\n");

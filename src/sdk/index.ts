@@ -5,41 +5,36 @@
  *
  * @example Quick start with createClient (recommended)
  * ```typescript
- * import { createClient, SpritesSandboxProvider } from '@repo/browserd/sdk';
+ * import { createClient, SpritesSandboxProvider } from "browserd";
  *
  * // Create sandbox with session management methods
- * const { sandbox, manager, createSession, getSessionClient, destroySession } = await createClient({
- *   provider: new SpritesSandboxProvider({ token: 'your-token' }),
+ * const { sandbox, manager, createSession } = await createClient({
+ *   provider: new SpritesSandboxProvider({ token: "your-token" }),
  * });
  *
- * // Create a browser session
- * const session = await createSession();
- *
- * // Get a connected client for the session
- * const browser = await getSessionClient(session.id);
- * await browser.connect();
+ * // createSession() returns an already-connected BrowserdClient
+ * const browser = await createSession();
  *
  * // Use the browser
- * await browser.navigate('https://example.com');
- * await browser.click('button#submit');
+ * await browser.navigate("https://example.com");
+ * await browser.click("button#submit");
  *
  * // Cleanup
  * await browser.close();
- * await destroySession(session.id);
  * await manager.destroy(sandbox.id);
  * ```
  *
- * @example Connect to existing browserd session
+ * @example Connect to existing browserd server directly
  * ```typescript
- * import { BrowserdClient } from '@repo/browserd/sdk';
+ * import { BrowserdClient } from "browserd";
  *
  * const client = new BrowserdClient({
- *   url: 'ws://localhost:3000/sessions/my-session/ws',
+ *   url: "ws://localhost:3000/sessions/my-session/ws",
  * });
  *
  * await client.connect();
- * await client.navigate('https://example.com');
- * await client.click('button#submit');
+ * await client.navigate("https://example.com");
+ * await client.click("button#submit");
  * await client.close();
  * ```
  */
