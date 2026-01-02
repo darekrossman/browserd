@@ -137,8 +137,7 @@ function createSSEStreamResponse(sessionId: string): Response {
 	const clientId = generateSSEClientId();
 	let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 	let isCleanedUp = false;
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	let directController: any = null;
+	let directController: ReadableStreamDirectController | null = null;
 
 	const cleanup = () => {
 		if (isCleanedUp) return;
@@ -158,10 +157,9 @@ function createSSEStreamResponse(sessionId: string): Response {
 	};
 
 	// Use Bun's direct stream type for immediate flushing
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const stream = new ReadableStream({
-		type: "direct" as any,
-		async pull(controller: any) {
+	const underlyingSource: Bun.DirectUnderlyingSource = {
+		type: "direct",
+		async pull(controller: ReadableStreamDirectController) {
 			directController = controller;
 
 			// Create client entry with direct write + flush
@@ -229,7 +227,13 @@ function createSSEStreamResponse(sessionId: string): Response {
 			// The stream will be closed when the client disconnects
 			return new Promise<void>(() => {});
 		},
-	});
+	};
+	// Type assertion needed: Bun's DirectUnderlyingSource is properly typed but
+	// TypeScript's lib.dom overrides prevent the overload from matching.
+	// See: https://github.com/oven-sh/bun/issues/13977
+	const stream = new ReadableStream(
+		underlyingSource as unknown as Bun.UnderlyingSource<Uint8Array>,
+	);
 
 	// Handle stream close
 	stream.cancel = () => {
