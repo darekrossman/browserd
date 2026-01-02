@@ -234,7 +234,9 @@ export interface SandboxInfo {
  */
 export interface SessionMethods {
 	/** Create a new browser session and return a connected client ready to use */
-	createSession: (options?: CreateSessionOptions) => Promise<import("./client").BrowserdClient>;
+	createSession: (
+		options?: CreateSessionOptions,
+	) => Promise<import("./client").BrowserdClient>;
 	/** List all active sessions */
 	listSessions: () => Promise<ListSessionsResponse>;
 	/** Get an existing session's connected client (cached or creates new connection) */

@@ -67,13 +67,32 @@ export interface VercelSandboxProviderOptions extends SandboxProviderOptions {
 	 * Base URL for blob storage where browserd.tar.gz is stored (optional)
 	 *
 	 * If not provided, the provider will use the local bundle/browserd.tar.gz
-	 * file and deploy it via base64 encoding.
+	 * file and deploy it via writeFiles.
 	 */
 	blobBaseUrl?: string;
 	/** Vercel sandbox runtime (default: "node24") */
 	runtime?: string;
 	/** Run browser in headed mode (default: false - headless) */
 	headed?: boolean;
+	/**
+	 * Existing sandbox ID to reuse (optional)
+	 *
+	 * If provided, the provider will attempt to connect to this sandbox
+	 * instead of creating a new one. If the sandbox is not running or
+	 * browserd is not healthy, behavior depends on devMode.
+	 */
+	sandboxId?: string;
+	/**
+	 * Development mode for quick iteration (default: false)
+	 *
+	 * When true and sandboxId is provided:
+	 * - Skips system dependency installation (assumes already installed)
+	 * - Kills any running browserd process
+	 * - Re-uploads and starts browserd with latest bundle
+	 *
+	 * This allows rapid testing of browserd changes without full reprovisioning.
+	 */
+	devMode?: boolean;
 }
 
 /**

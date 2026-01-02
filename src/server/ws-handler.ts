@@ -436,11 +436,17 @@ export class MultiSessionWSHandler {
 		// Get session for routing
 		const session = this.sessionManager.getSession(sessionId);
 		if (!session) {
-			console.warn(`[ws] Session ${sessionId} not found for client ${ws.data.id}`);
+			console.warn(
+				`[ws] Session ${sessionId} not found for client ${ws.data.id}`,
+			);
 			if (parsed.type === "cmd") {
 				this.send(
 					ws,
-					createErrorResult(parsed.id, "SESSION_NOT_FOUND", `Session ${sessionId} not found`),
+					createErrorResult(
+						parsed.id,
+						"SESSION_NOT_FOUND",
+						`Session ${sessionId} not found`,
+					),
 				);
 			}
 			return;
@@ -478,11 +484,17 @@ export class MultiSessionWSHandler {
 	/**
 	 * Dispatch input to session's CDP
 	 */
-	async dispatchInput(session: BrowserSession, input: InputMessage): Promise<void> {
+	async dispatchInput(
+		session: BrowserSession,
+		input: InputMessage,
+	): Promise<void> {
 		try {
 			await session.cdpSession.dispatchInput(input);
 		} catch (error) {
-			console.error(`[ws] Input dispatch error for session ${session.id}:`, error);
+			console.error(
+				`[ws] Input dispatch error for session ${session.id}:`,
+				error,
+			);
 		}
 	}
 
@@ -499,7 +511,11 @@ export class MultiSessionWSHandler {
 		} else {
 			this.send(
 				ws,
-				createErrorResult(cmd.id, "NOT_IMPLEMENTED", "Command handling not implemented"),
+				createErrorResult(
+					cmd.id,
+					"NOT_IMPLEMENTED",
+					"Command handling not implemented",
+				),
 			);
 		}
 	}
@@ -606,7 +622,9 @@ export class MultiSessionWSHandler {
 	/**
 	 * Get viewport for a session
 	 */
-	getSessionViewport(sessionId: string): { w: number; h: number; dpr: number } | null {
+	getSessionViewport(
+		sessionId: string,
+	): { w: number; h: number; dpr: number } | null {
 		const session = this.sessionManager.getSession(sessionId);
 		return session?.cdpSession.getViewport() ?? null;
 	}

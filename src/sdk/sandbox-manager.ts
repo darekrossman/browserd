@@ -104,15 +104,23 @@ export class SandboxManager {
 		}
 
 		// Track the sandbox
-		this.sandboxes.set(sandbox.id, { sandbox, baseUrl, transport, clients: new Map() });
+		this.sandboxes.set(sandbox.id, {
+			sandbox,
+			baseUrl,
+			transport,
+			clients: new Map(),
+		});
 
 		// Create bound session management methods
 		const createSession = (sessionOptions?: CreateSessionOptions) =>
 			this.createSession(sandbox.id, sessionOptions);
 		const listSessions = () => this.listSessions(sandbox.id);
-		const getSession = (sessionId: string) => this.getSession(sandbox.id, sessionId);
-		const getSessionInfo = (sessionId: string) => this.getSessionInfo(sandbox.id, sessionId);
-		const destroySession = (sessionId: string) => this.destroySession(sandbox.id, sessionId);
+		const getSession = (sessionId: string) =>
+			this.getSession(sandbox.id, sessionId);
+		const getSessionInfo = (sessionId: string) =>
+			this.getSessionInfo(sandbox.id, sessionId);
+		const destroySession = (sessionId: string) =>
+			this.destroySession(sandbox.id, sessionId);
 
 		return {
 			sandbox,
@@ -133,7 +141,10 @@ export class SandboxManager {
 	): Promise<BrowserdClient> {
 		const managed = this.sandboxes.get(sandboxId);
 		if (!managed) {
-			throw new BrowserdError("SANDBOX_NOT_FOUND", `Sandbox ${sandboxId} not found`);
+			throw new BrowserdError(
+				"SANDBOX_NOT_FOUND",
+				`Sandbox ${sandboxId} not found`,
+			);
 		}
 
 		// Retry logic for transient proxy errors (502, 503, 504)
@@ -160,13 +171,17 @@ export class SandboxManager {
 
 			// Check for retryable errors (proxy/gateway issues)
 			if ([502, 503, 504].includes(response.status) && attempt < maxRetries) {
-				lastError = new Error(`HTTP ${response.status}: ${response.statusText}`);
+				lastError = new Error(
+					`HTTP ${response.status}: ${response.statusText}`,
+				);
 				await new Promise((r) => setTimeout(r, retryDelay * attempt));
 				continue;
 			}
 
 			// Non-retryable error or last attempt
-			const error = await response.json().catch(() => ({ error: "Unknown error" }));
+			const error = await response
+				.json()
+				.catch(() => ({ error: "Unknown error" }));
 			throw new BrowserdError(
 				"SESSION_ERROR",
 				error.error || `Failed to create session: ${response.status}`,
@@ -186,7 +201,6 @@ export class SandboxManager {
 		managed: ManagedSandbox,
 		sessionInfo: SessionInfo,
 	): Promise<BrowserdClient> {
-
 		// Fix URLs to use sandbox's external base URL (server returns localhost URLs)
 		const wsBase = managed.baseUrl.replace(/^http/, "ws");
 		sessionInfo.wsUrl = `${wsBase}/sessions/${sessionInfo.id}/ws`;
@@ -194,7 +208,8 @@ export class SandboxManager {
 		sessionInfo.inputUrl = `${managed.baseUrl}/sessions/${sessionInfo.id}/input`;
 		sessionInfo.viewerUrl = `${managed.baseUrl}/sessions/${sessionInfo.id}/viewer`;
 
-		const sessionUrl = managed.transport === "sse" ? sessionInfo.streamUrl : sessionInfo.wsUrl;
+		const sessionUrl =
+			managed.transport === "sse" ? sessionInfo.streamUrl : sessionInfo.wsUrl;
 
 		const client = new BrowserdClient({
 			url: sessionUrl,
@@ -219,7 +234,10 @@ export class SandboxManager {
 	private async listSessions(sandboxId: string): Promise<ListSessionsResponse> {
 		const managed = this.sandboxes.get(sandboxId);
 		if (!managed) {
-			throw new BrowserdError("SANDBOX_NOT_FOUND", `Sandbox ${sandboxId} not found`);
+			throw new BrowserdError(
+				"SANDBOX_NOT_FOUND",
+				`Sandbox ${sandboxId} not found`,
+			);
 		}
 
 		const response = await fetch(`${managed.baseUrl}/api/sessions`, {
@@ -243,10 +261,16 @@ export class SandboxManager {
 	/**
 	 * Get a connected client for a session (cached or creates new connection)
 	 */
-	private async getSession(sandboxId: string, sessionId: string): Promise<BrowserdClient> {
+	private async getSession(
+		sandboxId: string,
+		sessionId: string,
+	): Promise<BrowserdClient> {
 		const managed = this.sandboxes.get(sandboxId);
 		if (!managed) {
-			throw new BrowserdError("SANDBOX_NOT_FOUND", `Sandbox ${sandboxId} not found`);
+			throw new BrowserdError(
+				"SANDBOX_NOT_FOUND",
+				`Sandbox ${sandboxId} not found`,
+			);
 		}
 
 		// Return cached client if available and connected
@@ -263,23 +287,35 @@ export class SandboxManager {
 	/**
 	 * Get information about a specific session without connecting
 	 */
-	private async getSessionInfo(sandboxId: string, sessionId: string): Promise<SessionInfo> {
+	private async getSessionInfo(
+		sandboxId: string,
+		sessionId: string,
+	): Promise<SessionInfo> {
 		const managed = this.sandboxes.get(sandboxId);
 		if (!managed) {
-			throw new BrowserdError("SANDBOX_NOT_FOUND", `Sandbox ${sandboxId} not found`);
+			throw new BrowserdError(
+				"SANDBOX_NOT_FOUND",
+				`Sandbox ${sandboxId} not found`,
+			);
 		}
 
-		const response = await fetch(`${managed.baseUrl}/api/sessions/${sessionId}`, {
-			headers: {
-				...(managed.sandbox.authToken && {
-					Authorization: `Bearer ${managed.sandbox.authToken}`,
-				}),
+		const response = await fetch(
+			`${managed.baseUrl}/api/sessions/${sessionId}`,
+			{
+				headers: {
+					...(managed.sandbox.authToken && {
+						Authorization: `Bearer ${managed.sandbox.authToken}`,
+					}),
+				},
 			},
-		});
+		);
 
 		if (!response.ok) {
 			if (response.status === 404) {
-				throw new BrowserdError("SESSION_NOT_FOUND", `Session ${sessionId} not found`);
+				throw new BrowserdError(
+					"SESSION_NOT_FOUND",
+					`Session ${sessionId} not found`,
+				);
 			}
 			throw new BrowserdError(
 				"SESSION_ERROR",
@@ -297,23 +333,32 @@ export class SandboxManager {
 	 * as it handles both disconnection and session destruction.
 	 * This method is useful when you need to destroy a session without a client reference.
 	 */
-	private async destroySession(sandboxId: string, sessionId: string): Promise<void> {
+	private async destroySession(
+		sandboxId: string,
+		sessionId: string,
+	): Promise<void> {
 		const managed = this.sandboxes.get(sandboxId);
 		if (!managed) {
-			throw new BrowserdError("SANDBOX_NOT_FOUND", `Sandbox ${sandboxId} not found`);
+			throw new BrowserdError(
+				"SANDBOX_NOT_FOUND",
+				`Sandbox ${sandboxId} not found`,
+			);
 		}
 
 		// Remove from cache (don't call close() to avoid double API call)
 		managed.clients.delete(sessionId);
 
-		const response = await fetch(`${managed.baseUrl}/api/sessions/${sessionId}`, {
-			method: "DELETE",
-			headers: {
-				...(managed.sandbox.authToken && {
-					Authorization: `Bearer ${managed.sandbox.authToken}`,
-				}),
+		const response = await fetch(
+			`${managed.baseUrl}/api/sessions/${sessionId}`,
+			{
+				method: "DELETE",
+				headers: {
+					...(managed.sandbox.authToken && {
+						Authorization: `Bearer ${managed.sandbox.authToken}`,
+					}),
+				},
 			},
-		});
+		);
 
 		if (!response.ok) {
 			if (response.status === 404) {

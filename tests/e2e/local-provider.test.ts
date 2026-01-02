@@ -90,7 +90,8 @@ describe("LocalSandboxProvider E2E", () => {
 				manager = new SandboxManager({ provider });
 
 				// Create sandbox
-				const { sandbox, createSession, destroySession } = await manager.create();
+				const { sandbox, createSession, destroySession } =
+					await manager.create();
 
 				expect(sandbox.id).toMatch(/^local-/);
 				expect(sandbox.status).toBe("ready");

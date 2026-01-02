@@ -6,7 +6,11 @@
  */
 
 import { SandboxManager, type SandboxManagerOptions } from "./sandbox-manager";
-import type { CreateSandboxOptions, SandboxInfo, SessionMethods } from "./types";
+import type {
+	CreateSandboxOptions,
+	SandboxInfo,
+	SessionMethods,
+} from "./types";
 
 /**
  * Result of createClient function

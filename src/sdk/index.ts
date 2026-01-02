@@ -46,6 +46,12 @@
 
 // Main client
 export { BrowserdClient } from "./client";
+// Convenience function
+export {
+	type CreateClientOptions,
+	type CreateClientResult,
+	createClient,
+} from "./create-client";
 // Errors
 export { BrowserdError, type BrowserdErrorCode } from "./errors";
 // Providers
@@ -62,12 +68,6 @@ export { VercelSandboxProvider } from "./providers/vercel";
 export type { SandboxManagerOptions } from "./sandbox-manager";
 // Sandbox management
 export { SandboxManager } from "./sandbox-manager";
-// Convenience function
-export {
-	createClient,
-	type CreateClientOptions,
-	type CreateClientResult,
-} from "./create-client";
 
 // Types
 export type {
@@ -81,9 +81,12 @@ export type {
 	// Sandbox
 	CreateSandboxOptions,
 	CreateSandboxResult,
+	// Session
+	CreateSessionOptions,
 	EvaluateOptions,
 	FillOptions,
 	HoverOptions,
+	ListSessionsResponse,
 	NavigateOptions,
 	NavigateResult,
 	PressOptions,
@@ -91,12 +94,9 @@ export type {
 	SandboxStatus,
 	ScreenshotOptions,
 	ScreenshotResult,
-	TypeOptions,
-	// Session
-	CreateSessionOptions,
-	ListSessionsResponse,
 	SessionInfo,
 	SessionMethods,
+	TypeOptions,
 	// Protocol re-exports
 	Viewport,
 	WaitOptions,

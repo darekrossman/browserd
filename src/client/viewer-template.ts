@@ -26,8 +26,10 @@ export function generateViewerHTML(options: ViewerOptions = {}): string {
 
 	// Build session-specific or legacy paths
 	const wsPath = sessionId === "default" ? "/ws" : `/sessions/${sessionId}/ws`;
-	const streamPath = sessionId === "default" ? "/stream" : `/sessions/${sessionId}/stream`;
-	const inputPath = sessionId === "default" ? "/input" : `/sessions/${sessionId}/input`;
+	const streamPath =
+		sessionId === "default" ? "/stream" : `/sessions/${sessionId}/stream`;
+	const inputPath =
+		sessionId === "default" ? "/input" : `/sessions/${sessionId}/input`;
 
 	return `<!DOCTYPE html>
 <html lang="en">
@@ -705,7 +707,9 @@ export interface GridViewerOptions {
 /**
  * Generate the grid viewer HTML page showing all sessions
  */
-export function generateGridViewerHTML(options: GridViewerOptions = {}): string {
+export function generateGridViewerHTML(
+	options: GridViewerOptions = {},
+): string {
 	const { title = "Browserd - All Sessions" } = options;
 
 	return `<!DOCTYPE html>
@@ -902,7 +906,14 @@ export function generateGridViewerHTML(options: GridViewerOptions = {}): string 
       const sessionCountEl = document.getElementById('session-count');
 
       // Track sessions and their connections
-      const sessions = new Map(); // sessionId -> { eventSource, canvas, ctx }
+      const sessions = new Map(); // sessionId -> { connection, canvas, ctx, transport }
+
+      // Check for forced transport via query param
+      const urlParams = new URLSearchParams(location.search);
+      const forcedTransport = urlParams.get('transport');
+
+      // WebSocket protocol
+      const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
 
       // Fetch and update sessions
       async function fetchSessions() {
@@ -946,47 +957,140 @@ export function generateGridViewerHTML(options: GridViewerOptions = {}): string 
         return { cell, canvas };
       }
 
-      // Connect to session stream
-      function connectToSession(sessionId, canvas) {
-        const ctx = canvas.getContext('2d');
-        const streamUrl = '/sessions/' + sessionId + '/stream';
+      // Set status dot for a session
+      function setSessionStatus(sessionId, status) {
+        const dot = document.getElementById('dot-' + sessionId);
+        if (dot) {
+          dot.className = 'status-dot ' + status;
+        }
+      }
 
+      // Handle incoming message for a session
+      function handleSessionMessage(sessionId, canvas, msg) {
+        if (msg.type === 'frame') {
+          const ctx = canvas.getContext('2d');
+          const img = new Image();
+          img.onload = () => {
+            if (canvas.width !== msg.viewport.w || canvas.height !== msg.viewport.h) {
+              canvas.width = msg.viewport.w;
+              canvas.height = msg.viewport.h;
+            }
+            ctx.drawImage(img, 0, 0);
+          };
+          img.src = 'data:image/jpeg;base64,' + msg.data;
+        }
+      }
+
+      // Connect via WebSocket with timeout
+      function connectWebSocket(sessionId, canvas) {
+        return new Promise((resolve, reject) => {
+          const wsUrl = wsProtocol + '//' + location.host + '/sessions/' + sessionId + '/ws';
+          const ws = new WebSocket(wsUrl);
+
+          const timeout = setTimeout(() => {
+            ws.close();
+            reject(new Error('WebSocket connection timeout'));
+          }, 3000);
+
+          ws.onopen = () => {
+            clearTimeout(timeout);
+            setSessionStatus(sessionId, 'connected');
+            resolve({ type: 'ws', connection: ws });
+          };
+
+          ws.onerror = () => {
+            clearTimeout(timeout);
+            reject(new Error('WebSocket error'));
+          };
+
+          ws.onclose = () => {
+            const session = sessions.get(sessionId);
+            if (session && session.transport === 'ws') {
+              setSessionStatus(sessionId, 'connecting');
+              // Reconnect after delay
+              setTimeout(() => {
+                if (sessions.has(sessionId)) {
+                  connectToSession(sessionId, canvas);
+                }
+              }, 2000);
+            }
+          };
+
+          ws.onmessage = (event) => {
+            try {
+              const msg = JSON.parse(event.data);
+              handleSessionMessage(sessionId, canvas, msg);
+            } catch (err) {
+              console.error('Failed to parse WebSocket message:', err);
+            }
+          };
+        });
+      }
+
+      // Connect via SSE
+      function connectSSE(sessionId, canvas) {
+        const streamUrl = '/sessions/' + sessionId + '/stream';
         const eventSource = new EventSource(streamUrl);
 
         eventSource.onopen = () => {
-          const dot = document.getElementById('dot-' + sessionId);
-          if (dot) {
-            dot.className = 'status-dot connected';
-          }
+          setSessionStatus(sessionId, 'connected');
         };
 
         eventSource.onerror = () => {
-          const dot = document.getElementById('dot-' + sessionId);
-          if (dot) {
-            dot.className = 'status-dot connecting';
-          }
+          setSessionStatus(sessionId, 'connecting');
+          // EventSource auto-reconnects
         };
 
         eventSource.onmessage = (event) => {
           try {
             const msg = JSON.parse(event.data);
-            if (msg.type === 'frame') {
-              const img = new Image();
-              img.onload = () => {
-                if (canvas.width !== msg.viewport.w || canvas.height !== msg.viewport.h) {
-                  canvas.width = msg.viewport.w;
-                  canvas.height = msg.viewport.h;
-                }
-                ctx.drawImage(img, 0, 0);
-              };
-              img.src = 'data:image/jpeg;base64,' + msg.data;
-            }
+            handleSessionMessage(sessionId, canvas, msg);
           } catch (err) {
-            console.error('Failed to parse message:', err);
+            console.error('Failed to parse SSE message:', err);
           }
         };
 
-        return eventSource;
+        return { type: 'sse', connection: eventSource };
+      }
+
+      // Connect to session stream (auto-detect transport)
+      async function connectToSession(sessionId, canvas) {
+        // If forced transport, use that
+        if (forcedTransport === 'sse') {
+          const result = connectSSE(sessionId, canvas);
+          return { ...result, transport: 'sse' };
+        }
+
+        if (forcedTransport === 'ws') {
+          try {
+            const result = await connectWebSocket(sessionId, canvas);
+            return { ...result, transport: 'ws' };
+          } catch (err) {
+            console.error('WebSocket forced but failed:', err);
+            setSessionStatus(sessionId, 'connecting');
+            return null;
+          }
+        }
+
+        // Auto-detect: try WebSocket first, fall back to SSE
+        try {
+          const result = await connectWebSocket(sessionId, canvas);
+          return { ...result, transport: 'ws' };
+        } catch (err) {
+          console.log('WebSocket unavailable for session ' + sessionId + ', using SSE:', err.message);
+          const result = connectSSE(sessionId, canvas);
+          return { ...result, transport: 'sse' };
+        }
+      }
+
+      // Close a session connection
+      function closeConnection(sessionData) {
+        if (!sessionData || !sessionData.connection) return;
+        if (sessionData.transport === 'ws') {
+          sessionData.connection.close();
+        } else if (sessionData.transport === 'sse') {
+          sessionData.connection.close();
+        }
       }
 
       // Update grid with sessions
@@ -997,7 +1101,7 @@ export function generateGridViewerHTML(options: GridViewerOptions = {}): string 
         // Remove sessions that no longer exist
         for (const [id, sessionData] of sessions) {
           if (!currentIds.has(id)) {
-            sessionData.eventSource?.close();
+            closeConnection(sessionData);
             const cell = document.getElementById('cell-' + id);
             if (cell) cell.remove();
             sessions.delete(id);
@@ -1009,8 +1113,10 @@ export function generateGridViewerHTML(options: GridViewerOptions = {}): string 
           if (!sessions.has(session.id)) {
             const { cell, canvas } = createSessionCell(session);
             grid.appendChild(cell);
-            const eventSource = connectToSession(session.id, canvas);
-            sessions.set(session.id, { eventSource, canvas });
+            const connectionData = await connectToSession(session.id, canvas);
+            if (connectionData) {
+              sessions.set(session.id, { ...connectionData, canvas });
+            }
           }
         }
 
@@ -1045,7 +1151,9 @@ export function generateGridViewerHTML(options: GridViewerOptions = {}): string 
 /**
  * Create Response with grid viewer HTML
  */
-export function createGridViewerResponse(options?: GridViewerOptions): Response {
+export function createGridViewerResponse(
+	options?: GridViewerOptions,
+): Response {
 	return new Response(generateGridViewerHTML(options), {
 		headers: {
 			"Content-Type": "text/html; charset=utf-8",

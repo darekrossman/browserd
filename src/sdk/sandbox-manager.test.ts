@@ -28,8 +28,14 @@ describe("SandboxManager", () => {
 
 	describe("create", () => {
 		it("should create sandbox and return session methods", async () => {
-			const { sandbox, createSession, listSessions, getSession, getSessionInfo, destroySession } =
-				await manager.create();
+			const {
+				sandbox,
+				createSession,
+				listSessions,
+				getSession,
+				getSessionInfo,
+				destroySession,
+			} = await manager.create();
 
 			expect(sandbox.id).toMatch(/^mock_sandbox_\d+$/);
 			expect(sandbox.status).toBe("ready");

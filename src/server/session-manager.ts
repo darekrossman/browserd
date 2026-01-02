@@ -105,7 +105,6 @@ export interface SessionInfo {
 	url: string;
 }
 
-
 // Chromium launch arguments
 const CHROMIUM_ARGS = [
 	"--disable-dev-shm-usage",
@@ -170,9 +169,13 @@ export class SessionManager {
 	/**
 	 * Create a new browser session
 	 */
-	async createSession(options: CreateSessionOptions = {}): Promise<BrowserSession> {
+	async createSession(
+		options: CreateSessionOptions = {},
+	): Promise<BrowserSession> {
 		if (!this.browser) {
-			throw new Error("SessionManager not initialized. Call initialize() first.");
+			throw new Error(
+				"SessionManager not initialized. Call initialize() first.",
+			);
 		}
 
 		// Check session limit
@@ -201,19 +204,26 @@ export class SessionManager {
 			userAgent: options.userAgent ?? profile.userAgent,
 			locale: stealthConfig.enabled ? profile.locale : undefined,
 			timezoneId: stealthConfig.enabled ? profile.timezone : undefined,
-			deviceScaleFactor: stealthConfig.enabled ? profile.deviceScaleFactor : undefined,
+			deviceScaleFactor: stealthConfig.enabled
+				? profile.deviceScaleFactor
+				: undefined,
 		});
 
 		// Apply stealth scripts
 		if (stealthConfig.enabled) {
-			const stealthScript = generateStealthScript(profile, stealthConfig.fingerprint);
+			const stealthScript = generateStealthScript(
+				profile,
+				stealthConfig.fingerprint,
+			);
 			await context.addInitScript(stealthScript);
 			await context.addInitScript(MAIN_CONTEXT_BRIDGE_SCRIPT);
 
 			// Block bot detection scripts
 			if (stealthConfig.blockBotDetection) {
 				for (const pattern of BOT_DETECTION_DOMAINS) {
-					await context.route(pattern, (route) => route.abort("blockedbyclient"));
+					await context.route(pattern, (route) =>
+						route.abort("blockedbyclient"),
+					);
 				}
 			}
 
@@ -301,7 +311,6 @@ export class SessionManager {
 		return session;
 	}
 
-
 	/**
 	 * Get a session by ID
 	 */
@@ -364,7 +373,10 @@ export class SessionManager {
 		try {
 			await session.cdpSession.close();
 		} catch (error) {
-			console.error(`[session-manager] Error closing CDP for ${sessionId}:`, error);
+			console.error(
+				`[session-manager] Error closing CDP for ${sessionId}:`,
+				error,
+			);
 		}
 
 		// Clear command queue
@@ -374,7 +386,10 @@ export class SessionManager {
 		try {
 			await session.context.close();
 		} catch (error) {
-			console.error(`[session-manager] Error closing context for ${sessionId}:`, error);
+			console.error(
+				`[session-manager] Error closing context for ${sessionId}:`,
+				error,
+			);
 		}
 
 		// Cleanup stealth state
@@ -480,7 +495,9 @@ export class SessionManager {
 			// Check lifetime
 			const lifetime = now - session.createdAt;
 			if (lifetime > this.config.sessionMaxLifetime) {
-				console.log(`[session-manager] Session ${sessionId} exceeded max lifetime`);
+				console.log(
+					`[session-manager] Session ${sessionId} exceeded max lifetime`,
+				);
 				toDestroy.push(sessionId);
 				continue;
 			}
@@ -501,7 +518,9 @@ export class SessionManager {
 		}
 
 		if (toDestroy.length > 0) {
-			console.log(`[session-manager] GC cleaned up ${toDestroy.length} sessions`);
+			console.log(
+				`[session-manager] GC cleaned up ${toDestroy.length} sessions`,
+			);
 		}
 	}
 
@@ -577,8 +596,14 @@ export class SessionManager {
 export function createSessionManager(): SessionManager {
 	return new SessionManager({
 		maxSessions: parseInt(process.env.MAX_SESSIONS || "10", 10),
-		sessionIdleTimeout: parseInt(process.env.SESSION_IDLE_TIMEOUT || "300000", 10),
-		sessionMaxLifetime: parseInt(process.env.SESSION_MAX_LIFETIME || "3600000", 10),
+		sessionIdleTimeout: parseInt(
+			process.env.SESSION_IDLE_TIMEOUT || "300000",
+			10,
+		),
+		sessionMaxLifetime: parseInt(
+			process.env.SESSION_MAX_LIFETIME || "3600000",
+			10,
+		),
 		gcInterval: parseInt(process.env.SESSION_GC_INTERVAL || "60000", 10),
 		defaultViewport: {
 			width: parseInt(process.env.VIEWPORT_WIDTH || "1280", 10),

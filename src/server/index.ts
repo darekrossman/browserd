@@ -6,7 +6,10 @@
  */
 
 import type { ServerWebSocket } from "bun";
-import { createGridViewerResponse, createViewerResponse } from "../client/viewer-template";
+import {
+	createGridViewerResponse,
+	createViewerResponse,
+} from "../client/viewer-template";
 import {
 	type InputMessage,
 	type ServerMessage,
@@ -17,10 +20,7 @@ import {
 	createLivenessResponse,
 	createReadinessResponse,
 } from "./health";
-import {
-	createSessionManager,
-	type SessionManager,
-} from "./session-manager";
+import { createSessionManager, type SessionManager } from "./session-manager";
 import {
 	createWebSocketData,
 	MultiSessionWSHandler,
@@ -119,7 +119,9 @@ async function initBrowser(): Promise<void> {
  * Parse session ID from URL path
  * Matches: /sessions/{sessionId}/ws, /sessions/{sessionId}/stream, /sessions/{sessionId}/input
  */
-function parseSessionPath(path: string): { sessionId: string; endpoint: string } | null {
+function parseSessionPath(
+	path: string,
+): { sessionId: string; endpoint: string } | null {
 	const match = path.match(/^\/sessions\/([^/]+)\/(ws|stream|input|viewer)$/);
 	if (match) {
 		return { sessionId: match[1], endpoint: match[2] };
@@ -166,7 +168,8 @@ function createSSEStreamResponse(sessionId: string): Response {
 			const client: SSEClient = {
 				id: clientId,
 				sessionId,
-				controller: controller as unknown as ReadableStreamDefaultController<Uint8Array>,
+				controller:
+					controller as unknown as ReadableStreamDefaultController<Uint8Array>,
 				send: (data: string) => {
 					if (isCleanedUp || !directController) return;
 					try {
@@ -190,13 +193,17 @@ function createSSEStreamResponse(sessionId: string): Response {
 			);
 
 			// Send connected event
-			controller.write(`event: connected\ndata: ${JSON.stringify({ clientId, sessionId })}\n\n`);
+			controller.write(
+				`event: connected\ndata: ${JSON.stringify({ clientId, sessionId })}\n\n`,
+			);
 			controller.flush();
 
 			// Send viewport info if available
 			const viewport = wsHandler?.getSessionViewport(sessionId);
 			if (viewport) {
-				controller.write(`data: ${JSON.stringify({ type: "event", event: "ready", data: { viewport } })}\n\n`);
+				controller.write(
+					`data: ${JSON.stringify({ type: "event", event: "ready", data: { viewport } })}\n\n`,
+				);
 				controller.flush();
 			}
 
@@ -233,30 +240,34 @@ function createSSEStreamResponse(sessionId: string): Response {
 		return Promise.resolve();
 	};
 
-	return new Response(stream,
-		{
-			headers: {
-				"Content-Type": "text/event-stream; charset=utf-8",
-				"Cache-Control": "no-cache, no-store, no-transform, must-revalidate",
-				"Access-Control-Allow-Origin": "*",
-				// Prevent any compression - can break SSE over HTTP/2
-				"Content-Encoding": "identity",
-				// Disable proxy buffering (various proxies)
-				"X-Accel-Buffering": "no",
-				"X-Content-Type-Options": "nosniff",
-				// Fly.io specific - disable response buffering
-				"Fly-Force-Instance-Id": "true",
-			},
+	return new Response(stream, {
+		headers: {
+			"Content-Type": "text/event-stream; charset=utf-8",
+			"Cache-Control": "no-cache, no-store, no-transform, must-revalidate",
+			"Access-Control-Allow-Origin": "*",
+			// Prevent any compression - can break SSE over HTTP/2
+			"Content-Encoding": "identity",
+			// Disable proxy buffering (various proxies)
+			"X-Accel-Buffering": "no",
+			"X-Content-Type-Options": "nosniff",
+			// Fly.io specific - disable response buffering
+			"Fly-Force-Instance-Id": "true",
 		},
-	);
+	});
 }
 
 /**
  * Handle HTTP input for a session
  */
-async function handleSessionInput(sessionId: string, req: Request): Promise<Response> {
+async function handleSessionInput(
+	sessionId: string,
+	req: Request,
+): Promise<Response> {
 	if (!sessionManager) {
-		return Response.json({ ok: false, error: "Server not initialized" }, { status: 503 });
+		return Response.json(
+			{ ok: false, error: "Server not initialized" },
+			{ status: 503 },
+		);
 	}
 
 	const session = sessionManager.getSession(sessionId);
@@ -287,10 +298,7 @@ async function handleSessionInput(sessionId: string, req: Request): Promise<Resp
 			{ status: 400 },
 		);
 	} catch (error) {
-		return Response.json(
-			{ ok: false, error: String(error) },
-			{ status: 500 },
-		);
+		return Response.json({ ok: false, error: String(error) }, { status: 500 });
 	}
 }
 
@@ -308,7 +316,7 @@ async function handleSessionApiRequest(req: Request): Promise<Response | null> {
 	// POST /api/sessions - Create new session
 	if (req.method === "POST" && path === "/api/sessions") {
 		try {
-			const body = await req.json().catch(() => ({})) as {
+			const body = (await req.json().catch(() => ({}))) as {
 				viewport?: { width: number; height: number };
 				profile?: string;
 				initialUrl?: string;
@@ -321,16 +329,19 @@ async function handleSessionApiRequest(req: Request): Promise<Response | null> {
 			});
 
 			const baseUrl = getBaseUrl();
-			return Response.json({
-				id: session.id,
-				status: session.status,
-				wsUrl: `${baseUrl.replace("http", "ws")}/sessions/${session.id}/ws`,
-				streamUrl: `${baseUrl}/sessions/${session.id}/stream`,
-				inputUrl: `${baseUrl}/sessions/${session.id}/input`,
-				viewerUrl: `${baseUrl}/sessions/${session.id}/viewer`,
-				viewport: session.viewport,
-				createdAt: session.createdAt,
-			}, { status: 201 });
+			return Response.json(
+				{
+					id: session.id,
+					status: session.status,
+					wsUrl: `${baseUrl.replace("http", "ws")}/sessions/${session.id}/ws`,
+					streamUrl: `${baseUrl}/sessions/${session.id}/stream`,
+					inputUrl: `${baseUrl}/sessions/${session.id}/input`,
+					viewerUrl: `${baseUrl}/sessions/${session.id}/viewer`,
+					viewport: session.viewport,
+					createdAt: session.createdAt,
+				},
+				{ status: 201 },
+			);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			const isLimitError = message.includes("Maximum sessions");
@@ -338,7 +349,9 @@ async function handleSessionApiRequest(req: Request): Promise<Response | null> {
 				{
 					ok: false,
 					error: message,
-					code: isLimitError ? "SESSION_LIMIT_REACHED" : "SESSION_CREATION_FAILED",
+					code: isLimitError
+						? "SESSION_LIMIT_REACHED"
+						: "SESSION_CREATION_FAILED",
 				},
 				{ status: isLimitError ? 429 : 500 },
 			);
@@ -420,7 +433,10 @@ async function handleRequest(
 		// Check session exists
 		if (!sessionManager?.hasSession(sessionId)) {
 			return new Response(
-				JSON.stringify({ error: "Session not found", code: "SESSION_NOT_FOUND" }),
+				JSON.stringify({
+					error: "Session not found",
+					code: "SESSION_NOT_FOUND",
+				}),
 				{ status: 404, headers: { "Content-Type": "application/json" } },
 			);
 		}
@@ -442,7 +458,10 @@ async function handleRequest(
 
 		if (!sessionManager?.hasSession(sessionId)) {
 			return new Response(
-				JSON.stringify({ error: "Session not found", code: "SESSION_NOT_FOUND" }),
+				JSON.stringify({
+					error: "Session not found",
+					code: "SESSION_NOT_FOUND",
+				}),
 				{ status: 404, headers: { "Content-Type": "application/json" } },
 			);
 		}
@@ -473,7 +492,10 @@ async function handleRequest(
 
 		if (!sessionManager?.hasSession(sessionId)) {
 			return new Response(
-				JSON.stringify({ error: "Session not found", code: "SESSION_NOT_FOUND" }),
+				JSON.stringify({
+					error: "Session not found",
+					code: "SESSION_NOT_FOUND",
+				}),
 				{ status: 404, headers: { "Content-Type": "application/json" } },
 			);
 		}
@@ -603,7 +625,9 @@ async function main(): Promise<void> {
 		console.log(`[browserd] Server listening on http://${HOST}:${PORT}`);
 		console.log(`[browserd] Sessions API: http://${HOST}:${PORT}/api/sessions`);
 		console.log(`[browserd] Create session: POST /api/sessions`);
-		console.log(`[browserd] Session endpoints: /sessions/{id}/ws, /sessions/{id}/stream`);
+		console.log(
+			`[browserd] Session endpoints: /sessions/{id}/ws, /sessions/{id}/stream`,
+		);
 	} catch (error) {
 		console.error("[browserd] Failed to start:", error);
 		process.exit(1);
@@ -614,10 +638,4 @@ async function main(): Promise<void> {
 main();
 
 // Export for testing
-export {
-	sessionManager,
-	wsHandler,
-	handleRequest,
-	initBrowser,
-	getBaseUrl,
-};
+export { sessionManager, wsHandler, handleRequest, initBrowser, getBaseUrl };

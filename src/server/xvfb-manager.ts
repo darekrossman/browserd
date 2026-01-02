@@ -5,7 +5,7 @@
  * Starts Xvfb as a child process and ensures cleanup on shutdown.
  */
 
-import { spawn, type Subprocess } from "bun";
+import { type Subprocess, spawn } from "bun";
 
 export interface XvfbConfig {
 	/** Display number (default: 99) */
@@ -39,7 +39,9 @@ export function isXvfbNeeded(): boolean {
  *
  * @returns The DISPLAY string (e.g., ":99") or null if not started
  */
-export async function startXvfb(config: XvfbConfig = {}): Promise<string | null> {
+export async function startXvfb(
+	config: XvfbConfig = {},
+): Promise<string | null> {
 	// Skip if already running
 	if (xvfbState) {
 		return xvfbState.display;
@@ -108,10 +110,7 @@ export async function stopXvfb(): Promise<void> {
 		xvfbState.process.kill("SIGTERM");
 
 		// Wait briefly for graceful shutdown
-		await Promise.race([
-			xvfbState.process.exited,
-			Bun.sleep(1000),
-		]);
+		await Promise.race([xvfbState.process.exited, Bun.sleep(1000)]);
 
 		// Force kill if still running
 		if (xvfbState.process.exitCode === null) {

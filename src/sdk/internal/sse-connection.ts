@@ -61,7 +61,7 @@ export class SSEConnectionManager {
 
 	constructor(options: SSEConnectionManagerOptions) {
 		// Normalize URL (convert ws:// to http://)
-		let url = options.url
+		const url = options.url
 			.replace(/^wss:\/\//, "https://")
 			.replace(/^ws:\/\//, "http://");
 
@@ -90,9 +90,7 @@ export class SSEConnectionManager {
 		inputUrl: string;
 	} {
 		// Check for session-specific URL pattern: /sessions/{id}/stream
-		const sessionMatch = url.match(
-			/^(.+)\/sessions\/([^/]+)\/(stream|ws)$/,
-		);
+		const sessionMatch = url.match(/^(.+)\/sessions\/([^/]+)\/(stream|ws)$/);
 		if (sessionMatch) {
 			const baseUrl = sessionMatch[1];
 			const sessionId = sessionMatch[2];
@@ -195,14 +193,21 @@ export class SSEConnectionManager {
 						});
 
 						// Check for retryable errors (proxy/gateway issues)
-						if ([502, 503, 504].includes(response.status) && attempt < maxRetries) {
-							lastError = new Error(`HTTP ${response.status}: ${response.statusText}`);
+						if (
+							[502, 503, 504].includes(response.status) &&
+							attempt < maxRetries
+						) {
+							lastError = new Error(
+								`HTTP ${response.status}: ${response.statusText}`,
+							);
 							await new Promise((r) => setTimeout(r, retryDelay * attempt));
 							continue;
 						}
 
 						if (!response.ok) {
-							throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+							throw new Error(
+								`HTTP ${response.status}: ${response.statusText}`,
+							);
 						}
 
 						if (!response.body) {
@@ -232,7 +237,6 @@ export class SSEConnectionManager {
 						lastError = err instanceof Error ? err : new Error(String(err));
 						if (attempt < maxRetries) {
 							await new Promise((r) => setTimeout(r, retryDelay * attempt));
-							continue;
 						}
 					}
 				}

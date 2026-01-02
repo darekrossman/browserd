@@ -19,7 +19,9 @@ async function main() {
 	}
 
 	const spriteName = process.argv[2] || "sb1";
-	console.log(`Testing multiple createClient instances on sprite: ${spriteName}\n`);
+	console.log(
+		`Testing multiple createClient instances on sprite: ${spriteName}\n`,
+	);
 
 	// First, check existing sessions
 	console.log("=== Checking existing sessions ===");
@@ -29,14 +31,18 @@ async function main() {
 		debug: true,
 	});
 
-	const { sandbox: checkSandbox, listSessions: checkList } = await createClient({
-		provider: checkProvider,
-	});
+	const { sandbox: checkSandbox, listSessions: checkList } = await createClient(
+		{
+			provider: checkProvider,
+		},
+	);
 
 	const existing = await checkList();
 	console.log(`Existing sessions: ${existing.count}/${existing.maxSessions}`);
 	for (const sess of existing.sessions) {
-		console.log(`  - ${sess.id} (clients: ${sess.clientCount}, url: ${sess.url})`);
+		console.log(
+			`  - ${sess.id} (clients: ${sess.clientCount}, url: ${sess.url})`,
+		);
 	}
 
 	// === Client 1 ===
@@ -47,9 +53,10 @@ async function main() {
 		debug: true,
 	});
 
-	const { sandbox: sandbox1, createSession: createSession1 } = await createClient({
-		provider: provider1,
-	});
+	const { sandbox: sandbox1, createSession: createSession1 } =
+		await createClient({
+			provider: provider1,
+		});
 
 	console.log(`Client 1 - Sandbox ID: ${sandbox1.id}`);
 	console.log(`Client 1 - Domain: ${sandbox1.domain}`);
@@ -79,9 +86,10 @@ async function main() {
 		debug: true,
 	});
 
-	const { sandbox: sandbox2, createSession: createSession2 } = await createClient({
-		provider: provider2,
-	});
+	const { sandbox: sandbox2, createSession: createSession2 } =
+		await createClient({
+			provider: provider2,
+		});
 
 	console.log(`Client 2 - Sandbox ID: ${sandbox2.id}`);
 	console.log(`Client 2 - Domain: ${sandbox2.domain}`);
@@ -108,10 +116,14 @@ async function main() {
 	const final = await checkList();
 	console.log(`Total sessions: ${final.count}/${final.maxSessions}`);
 	for (const sess of final.sessions) {
-		console.log(`  - ${sess.id} (clients: ${sess.clientCount}, url: ${sess.url})`);
+		console.log(
+			`  - ${sess.id} (clients: ${sess.clientCount}, url: ${sess.url})`,
+		);
 	}
 
-	console.log("\nSessions left open. Check viewers to confirm they're working.");
+	console.log(
+		"\nSessions left open. Check viewers to confirm they're working.",
+	);
 	process.exit(0);
 }
 

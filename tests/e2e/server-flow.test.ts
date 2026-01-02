@@ -4,14 +4,7 @@
  * Full flow tests with no mocking (run in container)
  */
 
-import {
-	afterAll,
-	beforeAll,
-	beforeEach,
-	describe,
-	expect,
-	test,
-} from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createViewerResponse } from "../../src/client/viewer-template";
 import type { PlaywrightMethod } from "../../src/protocol/types";
 import {
@@ -49,7 +42,8 @@ describe("E2E Full Flow", () => {
 	let testSessionId: string | null = null;
 
 	// Dynamic WS URL based on session
-	const getWsUrl = () => `ws://127.0.0.1:${TEST_PORT}/sessions/${testSessionId}/ws`;
+	const getWsUrl = () =>
+		`ws://127.0.0.1:${TEST_PORT}/sessions/${testSessionId}/ws`;
 
 	beforeAll(async () => {
 		if (!runTests) return;

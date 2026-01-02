@@ -70,7 +70,9 @@ describe("SSEConnectionManager", () => {
 			const streamUrl = (manager as unknown as { streamUrl: string }).streamUrl;
 			const inputUrl = (manager as unknown as { inputUrl: string }).inputUrl;
 
-			expect(streamUrl).toBe("http://localhost:3000/sessions/sess-abc123/stream");
+			expect(streamUrl).toBe(
+				"http://localhost:3000/sessions/sess-abc123/stream",
+			);
 			expect(inputUrl).toBe("http://localhost:3000/sessions/sess-abc123/input");
 		});
 
@@ -81,7 +83,9 @@ describe("SSEConnectionManager", () => {
 			const streamUrl = (manager as unknown as { streamUrl: string }).streamUrl;
 			const inputUrl = (manager as unknown as { inputUrl: string }).inputUrl;
 
-			expect(streamUrl).toBe("http://localhost:3000/sessions/sess-abc123/stream");
+			expect(streamUrl).toBe(
+				"http://localhost:3000/sessions/sess-abc123/stream",
+			);
 			expect(inputUrl).toBe("http://localhost:3000/sessions/sess-abc123/input");
 		});
 
@@ -103,8 +107,12 @@ describe("SSEConnectionManager", () => {
 			const streamUrl = (manager as unknown as { streamUrl: string }).streamUrl;
 			const inputUrl = (manager as unknown as { inputUrl: string }).inputUrl;
 
-			expect(streamUrl).toBe("https://sandbox.example.com/sessions/sess-xyz/stream");
-			expect(inputUrl).toBe("https://sandbox.example.com/sessions/sess-xyz/input");
+			expect(streamUrl).toBe(
+				"https://sandbox.example.com/sessions/sess-xyz/stream",
+			);
+			expect(inputUrl).toBe(
+				"https://sandbox.example.com/sessions/sess-xyz/input",
+			);
 		});
 	});
 

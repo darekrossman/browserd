@@ -66,7 +66,12 @@ export class BrowserdClient {
 	/** Session info if this client was created via createSession */
 	public readonly sessionInfo?: SessionInfo;
 
-	constructor(options: BrowserdClientOptions & { sessionId?: string; sessionInfo?: SessionInfo }) {
+	constructor(
+		options: BrowserdClientOptions & {
+			sessionId?: string;
+			sessionInfo?: SessionInfo;
+		},
+	) {
 		this.sessionId = options.sessionId;
 		this.sessionInfo = options.sessionInfo;
 		this.options = options;
@@ -494,7 +499,9 @@ export class BrowserdClient {
 		}
 		// Handle HTTP URLs (for SSE transport)
 		// Remove session-specific paths first (longer pattern), then simple /stream
-		return url.replace(/\/sessions\/[^/]+\/stream$/, "").replace(/\/stream$/, "");
+		return url
+			.replace(/\/sessions\/[^/]+\/stream$/, "")
+			.replace(/\/stream$/, "");
 	}
 
 	// ============================================================================
@@ -529,7 +536,9 @@ export class BrowserdClient {
 		});
 
 		if (!response.ok) {
-			const error = await response.json().catch(() => ({ error: "Unknown error" }));
+			const error = await response
+				.json()
+				.catch(() => ({ error: "Unknown error" }));
 			throw new BrowserdError(
 				"SESSION_ERROR",
 				error.error || `Failed to create session: ${response.status}`,
@@ -575,7 +584,10 @@ export class BrowserdClient {
 
 		if (!response.ok) {
 			if (response.status === 404) {
-				throw new BrowserdError("SESSION_NOT_FOUND", `Session ${sessionId} not found`);
+				throw new BrowserdError(
+					"SESSION_NOT_FOUND",
+					`Session ${sessionId} not found`,
+				);
 			}
 			throw new BrowserdError(
 				"SESSION_ERROR",
@@ -603,7 +615,10 @@ export class BrowserdClient {
 
 		if (!response.ok) {
 			if (response.status === 404) {
-				throw new BrowserdError("SESSION_NOT_FOUND", `Session ${sessionId} not found`);
+				throw new BrowserdError(
+					"SESSION_NOT_FOUND",
+					`Session ${sessionId} not found`,
+				);
 			}
 			throw new BrowserdError(
 				"SESSION_ERROR",
@@ -631,7 +646,8 @@ export class BrowserdClient {
 		const session = await this.getSession(sessionId);
 
 		// Create new client with session-specific URL
-		const sessionUrl = this.transport === "sse" ? session.streamUrl : session.wsUrl;
+		const sessionUrl =
+			this.transport === "sse" ? session.streamUrl : session.wsUrl;
 
 		return new BrowserdClient({
 			...this.options,

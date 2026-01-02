@@ -1,7 +1,19 @@
 import { createClient, VercelSandboxProvider } from "../src/sdk";
 
 async function main() {
-	const provider = new VercelSandboxProvider({});
+	// Parse CLI args: [sandboxId] [--dev]
+	const args = process.argv.slice(2);
+	const devMode = args.includes("--dev");
+	const sandboxId = args.find((a) => !a.startsWith("--"));
+
+	if (sandboxId) {
+		console.log(`Reusing sandbox: ${sandboxId}${devMode ? " (dev mode)" : ""}`);
+	}
+
+	const provider = new VercelSandboxProvider({
+		sandboxId,
+		devMode,
+	});
 
 	const { sandbox, createSession, listSessions } = await createClient({
 		provider,
@@ -39,6 +51,8 @@ async function main() {
 				console.log("  - Session 2: Google loaded");
 			}),
 		]);
+
+		process.exit(0);
 	} catch (err) {
 		console.error("\n--- Error ---");
 		console.error(err);
