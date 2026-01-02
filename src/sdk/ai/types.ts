@@ -2,7 +2,7 @@
  * Types for the AI SDK browser tool
  */
 
-import type { BrowserdClient } from "../client";
+import type { SandboxProvider } from "../providers/types";
 
 /**
  * Result type for all browser operations
@@ -10,10 +10,17 @@ import type { BrowserdClient } from "../client";
 export interface BrowserResult {
 	status: "success" | "error";
 	operation: string;
+	sessionId?: string; // Session ID for tracking across calls
 	data?: Record<string, unknown>;
 	screenshot?: string; // base64 for screenshot operation
 	error?: string;
-	errorType?: "timeout" | "not_found" | "navigation" | "evaluation" | "unknown";
+	errorType?:
+		| "timeout"
+		| "not_found"
+		| "navigation"
+		| "evaluation"
+		| "session"
+		| "unknown";
 }
 
 /**
@@ -21,9 +28,9 @@ export interface BrowserResult {
  */
 export interface CreateBrowserToolOptions {
 	/**
-	 * Pre-connected BrowserdClient instance
+	 * Sandbox provider for creating browser instances
 	 */
-	client: BrowserdClient;
+	provider: SandboxProvider;
 
 	/**
 	 * Default timeout for operations in milliseconds (default: 30000)

@@ -25,8 +25,18 @@ export const browserToolInputSchema = z.object({
 			"evaluate",
 			"screenshot",
 			"setViewport",
+			"closeSession",
 		])
 		.describe("The browser operation to perform"),
+
+	// Session management
+	sessionId: z
+		.string()
+		.optional()
+		.describe(
+			"Session ID from a previous call. REQUIRED for all calls after the first one to maintain your browser session. " +
+				"If not provided, a new session will be created.",
+		),
 
 	// Common
 	timeout: z

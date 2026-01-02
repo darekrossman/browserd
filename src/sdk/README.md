@@ -689,7 +689,7 @@ import type {
 
 ## AI SDK Integration
 
-The `browserd/ai` module provides a tool for the [Vercel AI SDK](https://ai-sdk.dev) that enables AI agents to control browsers.
+The `browserd/ai` module provides a tool for the [Vercel AI SDK](https://ai-sdk.dev) that enables AI agents to control browsers with automatic session management.
 
 ### Installation
 
@@ -703,37 +703,39 @@ bun add ai @ai-sdk/openai zod
 ```typescript
 import { generateText } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { createClient, LocalSandboxProvider } from "browserd";
+import { LocalSandboxProvider } from "browserd/providers";
 import { createBrowserTool } from "browserd/ai";
 
-// Create sandbox and session
-const { sandbox, manager, createSession } = await createClient({
-  provider: new LocalSandboxProvider(),
-});
-
-const browser = await createSession();
-
-// Create the AI browser tool
-const browserTool = createBrowserTool({ client: browser });
+// Create the AI browser tool with a provider
+// Sandbox is created lazily on first browser operation
+const provider = new LocalSandboxProvider();
+const browserTool = createBrowserTool({ provider });
 
 // Use with AI SDK
 const { text } = await generateText({
   model: openai("gpt-4o"),
   tools: { browser: browserTool },
   maxSteps: 10,
-  prompt: "Go to Hacker News and find the top story title",
+  prompt: `Go to Hacker News and find the top story title.
+           Make sure to save the sessionId from your first call,
+           use it in all subsequent calls, and call closeSession when done.`,
 });
 
 console.log(text);
-
-// Cleanup
-await browser.close();
-await manager.destroy(sandbox.id);
+// Note: Agent should have called closeSession to clean up
 ```
 
-### Supported Operations
+### Session Management
 
-The AI browser tool supports all standard browser operations:
+The AI browser tool automatically manages browser sessions:
+
+1. **First call**: Creates a sandbox and browser session, returns `sessionId`
+2. **Subsequent calls**: Agent must pass `sessionId` to maintain browser state
+3. **Cleanup**: Agent calls `closeSession` operation with `sessionId` when done
+
+The AI agent receives clear instructions in the tool description about session management.
+
+### Supported Operations
 
 | Operation | Description |
 |-----------|-------------|
@@ -749,19 +751,20 @@ The AI browser tool supports all standard browser operations:
 | `screenshot` | Capture page screenshot |
 | `setViewport` | Change viewport dimensions |
 | `goBack` / `goForward` / `reload` | Browser navigation |
+| `closeSession` | Close the browser session (call when done) |
 
 ### Options
 
 ```typescript
 const browserTool = createBrowserTool({
-  client: browser,        // Required: connected BrowserdClient
+  provider: myProvider,   // Required: SandboxProvider instance
   defaultTimeout: 30000,  // Optional: default timeout for operations (ms)
 });
 ```
 
 ### Example
 
-See [`examples/ai-browser-tool.ts`](../../examples/ai-browser-tool.ts) for a complete working example.
+See [`examples/browser-agent/index.ts`](../../examples/browser-agent/index.ts) for a complete working example.
 
 ---
 

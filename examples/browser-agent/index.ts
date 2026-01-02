@@ -2,29 +2,32 @@
  * AI Browser Tool Example
  *
  * This example demonstrates using the browserd AI SDK tool with Vercel AI SDK
- * to enable an AI agent to control a browser.
+ * to enable an AI agent to control a browser with automatic session management.
  *
  * Requirements:
- * - browserd sandbox running (local Docker, Vercel, etc)
+ * - A sandbox provider (Vercel, Sprites, or Local Docker)
  * - AI Gateway API key (or another AI SDK compatible provider)
+ *
+ * The AI browser tool automatically:
+ * - Creates a sandbox on first use
+ * - Manages browser sessions
+ * - Returns sessionId for the agent to track
+ * - Cleans up via closeSession operation
  */
 
 import { gateway, generateText, stepCountIs } from "ai";
-import { createClient } from "browserd";
-import { createBrowserTool } from "browserd/ai";
 import { VercelSandboxProvider } from "../../src/sdk";
+import { createBrowserTool } from "../../src/sdk/ai";
 
 async function main() {
-	const { createSession } = await createClient({
-		provider: new VercelSandboxProvider({
-			sandboxId: "sbx_PGdCpaTIOLEDcXXlLhwOHDoUyiHU",
-			defaultTimeout: 60 * 60000, // 1 hour
-		}),
+	// Create a provider for the browser tool. If sandboxId is not provided,
+	// or the sandbox is not found, a new one will be created.
+	const provider = new VercelSandboxProvider({
+		sandboxId: "sbx_hVTBO6rBAnsOYeV9HABo9eInJWvK",
+		defaultTimeout: 60 * 60000, // 1 hour
 	});
 
-	const browser = await createSession();
-
-	const browserTool = createBrowserTool({ client: browser });
+	const browserTool = createBrowserTool({ provider });
 
 	const prompt = `
     Go to Hacker News (https://news.ycombinator.com) and find the title of the
@@ -53,10 +56,10 @@ async function main() {
 			}
 		}
 	} finally {
-		// Cleanup
-		await browser.close();
-		// await manager.destroy(sandbox.id);
-		console.log("\nCleanup complete");
+		console.log("\nTask complete");
+		// Note: The AI agent should have called closeSession
+		// Sandbox may persist and timeout naturally, or can be
+		// cleaned up separately via provider if needed
 	}
 }
 

@@ -18,11 +18,21 @@ interface ModelOutput {
  */
 export function toModelOutput({ output }: ToModelOutputParams): ModelOutput {
 	if (output.status === "error") {
-		const errorMsg = `Browser ${output.operation} failed: ${output.error}`;
+		let errorMsg = `Browser ${output.operation} failed: ${output.error}`;
+		if (output.sessionId) {
+			errorMsg += `\nSession: ${output.sessionId}`;
+		}
 		return { type: "error-text", value: errorMsg };
 	}
 
-	let value = `Browser ${output.operation} completed successfully.\n`;
+	let value = `Browser ${output.operation} completed successfully.`;
+
+	// Always include sessionId for tracking
+	if (output.sessionId) {
+		value += `\nSession: ${output.sessionId}`;
+	}
+
+	value += "\n";
 	const data = output.data ?? {};
 
 	switch (output.operation) {
@@ -78,6 +88,11 @@ export function toModelOutput({ output }: ToModelOutputParams): ModelOutput {
 
 		case "setViewport":
 			value += `Viewport set to ${data.width}x${data.height}\n`;
+			break;
+
+		case "closeSession":
+			value +=
+				"Browser session closed. You can start a new session by calling the browser tool without a sessionId.\n";
 			break;
 
 		default:
