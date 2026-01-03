@@ -21,9 +21,9 @@
 
 import { type Sprite, SpritesClient } from "@fly/sprites";
 import { type Subprocess, spawn } from "bun";
-import { BrowserdError } from "../errors";
-import type { CreateSandboxOptions, SandboxInfo } from "../types";
-import type { SandboxProvider, SpritesSandboxProviderOptions } from "./types";
+import { BrowserdError } from "../../errors";
+import type { CreateSandboxOptions, SandboxInfo } from "../../types";
+import type { SandboxProvider, SandboxProviderOptions } from "../types";
 
 /**
  * Extended Sprite type that includes the `url` property from the API response.
@@ -39,6 +39,59 @@ interface SpriteEntry {
 	createdByUs: boolean;
 	proxyProcess?: Subprocess<"ignore", "pipe", "pipe">;
 	localProxyPort?: number;
+}
+
+/**
+ * Options for Sprites.dev Provider
+ */
+export interface SpritesSandboxProviderOptions extends SandboxProviderOptions {
+	/** API token (defaults to SPRITE_TOKEN env var) */
+	token?: string;
+	/** Organization name (optional) */
+	org?: string;
+	/** Existing sprite name to reuse (optional - creates new if not provided) */
+	spriteName?: string;
+	/** Checkpoint ID to restore from before starting (optional) */
+	checkpointId?: string;
+	/** Auto-install system deps if missing (default: true) */
+	autoSetup?: boolean;
+	/** Create checkpoint after setup (default: true) */
+	createCheckpointAfterSetup?: boolean;
+	/** Run browser in headed mode with Xvfb (default: true) */
+	headed?: boolean;
+	/** Timeout for ready check in ms (default: 120000 for cold start) */
+	readyTimeout?: number;
+	/** Enable debug logging (default: false) */
+	debug?: boolean;
+	/** Base URL for blob storage where browserd.tar.gz is stored (optional) */
+	blobBaseUrl?: string;
+	/**
+	 * Use local SSH tunnel for WebSocket connectivity (default: true)
+	 *
+	 * The sprite URL HTTPS proxy doesn't support WebSocket connections.
+	 * When enabled, spawns `sprite proxy` to create an SSH tunnel for
+	 * WebSocket access. The wsUrl will use localhost with the proxy port.
+	 *
+	 * Set to false if you only need HTTP access or handle proxy separately.
+	 */
+	useLocalProxy?: boolean;
+	/**
+	 * Local port for the proxy tunnel (default: auto-assigned)
+	 *
+	 * Only used when useLocalProxy is true. If not specified,
+	 * a random available port will be used.
+	 */
+	localProxyPort?: number;
+	/**
+	 * Auto-install the sprite CLI if not found (default: false)
+	 *
+	 * When enabled, automatically downloads and installs the sprite CLI
+	 * from https://sprites.dev/install.sh if it's not already installed.
+	 *
+	 * Note: Authentication still requires manual `sprite login` which
+	 * opens a browser for OAuth.
+	 */
+	autoInstallCli?: boolean;
 }
 
 /**

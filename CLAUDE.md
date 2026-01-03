@@ -1,10 +1,14 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with this repository.
 
 ## Project Overview
 
-Browserd is a cloud browser service that runs headful Chromium in Docker containers with live visual streaming via CDP screencast and remote control through a multiplexed WebSocket. It's designed for automation, testing, and anti-bot evasion scenarios.
+Browserd is a cloud browser service with two components:
+- **Browserd Server** - Hosts headful Chromium with live JPEG streaming via CDP screencast and remote control through WebSocket/SSE
+- **Browserd SDK** - TypeScript client library for connecting to and controlling browserd instances
+
+Designed for browser automation, testing, and anti-bot evasion scenarios.
 
 ## Commands
 
@@ -15,17 +19,23 @@ bun run start                   # Production server
 bun run check-types             # TypeScript type checking
 
 # Testing
-bun run test                    # Run all tests
-bun run test:unit               # Unit tests only (no browser required)
+bun run test                    # All tests
+bun run test:unit               # Unit tests (no browser required)
 bun run test:integration        # Integration tests (requires browser)
 bun run test:e2e                # End-to-end tests
 bun run test:stealth            # Anti-bot evasion tests
-bun test path/to/file.test.ts   # Run single test file
+bun test path/to/file.test.ts   # Single test file
 
-# Docker (for tests requiring Chromium)
+# Docker
 bun run docker:build            # Build sandbox image
 bun run docker:test             # Run all tests in container
-bun run docker:shell            # Shell into container for debugging
+bun run docker:shell            # Shell into container
+bun run docker:serve            # Run server in container
+bun run docker:serve:headed     # Headed browser in container
+
+# Build
+bun run bundle                  # Build server bundle (bundle/browserd.tar.gz)
+bun run build:sdk               # Build SDK for npm (dist/sdk/)
 
 # Code Quality
 bun run lint                    # Biome linter
@@ -35,127 +45,234 @@ bun run lint:fix                # Auto-fix lint issues
 ## Architecture
 
 ```
-Client (SDK/Viewer)  →  WebSocket  →  Browserd Server  →  rebrowser-playwright  →  Chromium
-       ↑                                    │
-       └────────── JPEG frames ─────────────┘
+Client (SDK/Viewer/AI Agent)
+          │
+    WebSocket / SSE / HTTP
+          │
+    ┌─────┴─────┐
+    │  Server   │
+    │  (Bun)    │
+    └─────┬─────┘
+          │
+    SessionManager ─── WSHandler
+          │                │
+    CDPSessionManager ─── CommandQueue
+          │                │
+    rebrowser-playwright (stealth patches)
+          │
+       Chromium + Xvfb
 ```
 
-### Core Components
+## Project Structure
 
-- **`src/server/`** - HTTP/WebSocket server (Bun.serve)
-  - `browser-manager.ts` - Chromium lifecycle with rebrowser-playwright stealth wrapper
-  - `ws-handler.ts` - WebSocket message routing and client management
-  - `cdp-session.ts` - CDP screencast streaming and input dispatch
-  - `command-queue.ts` - Serializes Playwright command execution
+```
+src/
+├── server/                 # Browserd server
+│   ├── index.ts            # Main entry (Bun.serve)
+│   ├── session-manager.ts  # Multi-session management, GC
+│   ├── browser-manager.ts  # Chromium lifecycle
+│   ├── cdp-session.ts      # CDP screencast & input dispatch
+│   ├── command-queue.ts    # Command serialization with timing
+│   ├── ws-handler.ts       # WebSocket message routing
+│   └── health.ts           # Health endpoints (/livez, /readyz, /health)
+├── sdk/                    # Client SDK
+│   ├── client.ts           # BrowserdClient class
+│   ├── sandbox-manager.ts  # Sandbox lifecycle management
+│   ├── create-client.ts    # Convenience factory function
+│   ├── providers/          # Infrastructure adapters
+│   │   ├── local.ts        # LocalProvider (manual server)
+│   │   ├── docker.ts       # DockerContainerProvider (OrbStack)
+│   │   ├── vercel.ts       # VercelSandboxProvider
+│   │   └── sprites.ts      # SpritesSandboxProvider
+│   ├── ai/                 # Vercel AI SDK integration
+│   │   ├── index.ts        # createBrowserTool()
+│   │   └── schema.ts       # Tool schema definition
+│   └── internal/           # Connection management
+│       ├── connection.ts   # WebSocket connection
+│       └── sse-connection.ts # SSE fallback
+├── stealth/                # Anti-detection
+│   ├── profiles.ts         # Browser fingerprint profiles
+│   ├── human-behavior.ts   # Mouse/keyboard emulation
+│   ├── timing.ts           # Action timing delays
+│   ├── scripts.ts          # Fingerprint spoofing scripts
+│   └── context-bridge.ts   # rebrowser-playwright integration
+├── protocol/               # Message types
+│   ├── types.ts            # WebSocket message definitions
+│   └── commands.ts         # Playwright method definitions
+└── client/                 # Web viewer
+    └── viewer-template.ts  # HTML/Canvas viewer generator
+```
 
-- **`src/sdk/`** - Client SDK for connecting to browserd instances
-  - `client.ts` - BrowserdClient main class
-  - `sandbox-manager.ts` - Provisions and manages browser sandboxes
-  - `providers/` - Infrastructure backends (local Docker, Vercel Sandbox)
+## Core Concepts
 
-- **`src/protocol/`** - WebSocket protocol definitions
-  - `types.ts` - Message types (CommandMessage, InputMessage, FrameMessage)
-  - `commands.ts` - Playwright method definitions
+### Server Sessions
 
-- **`src/stealth/`** - Anti-bot evasion (targets DataDome, PerimeterX, Cloudflare)
-  - `human-behavior.ts` - Human-like mouse/keyboard emulation
-  - `timing.ts` - Action timing with fatigue simulation
-  - `profiles.ts` - Browser fingerprint profiles
-  - `scripts.ts` - Canvas/WebGL/Audio fingerprint masking
+Sessions are isolated browser contexts with independent cookies/storage:
+
+```bash
+POST /api/sessions          # Create session
+GET  /api/sessions          # List sessions
+GET  /api/sessions/:id      # Get session info
+DELETE /api/sessions/:id    # Destroy session
+```
+
+Each session exposes:
+- `/sessions/:id/ws` - WebSocket connection
+- `/sessions/:id/stream` - SSE stream (HTTP fallback)
+- `/sessions/:id/input` - HTTP POST for commands (SSE mode)
+- `/sessions/:id/viewer` - Browser viewer UI
 
 ### WebSocket Protocol
 
-Client sends commands:
-```json
-{"id": "1", "type": "cmd", "method": "navigate", "params": {"url": "..."}}
-{"type": "input", "device": "mouse", "action": "click", "x": 100, "y": 200}
+```javascript
+// Client → Server
+{ "type": "cmd", "id": "1", "method": "navigate", "params": { "url": "..." } }
+{ "type": "input", "device": "mouse", "action": "click", "x": 100, "y": 200 }
+{ "type": "ping", "t": timestamp }
+
+// Server → Client
+{ "type": "frame", "format": "jpeg", "data": "<base64>", "viewport": {...} }
+{ "type": "result", "id": "1", "ok": true, "result": {...} }
+{ "type": "event", "name": "ready", "data": {...} }
+{ "type": "pong", "t": timestamp }
 ```
 
-Server sends:
-```json
-{"type": "frame", "format": "jpeg", "data": "<base64>", "viewport": {"w": 1280, "h": 720}}
-{"id": "1", "type": "result", "ok": true, "result": {...}}
+### SDK Providers
+
+| Provider | Use Case |
+|----------|----------|
+| `LocalProvider` | Connect to `bun run dev` server |
+| `DockerContainerProvider` | Docker containers with OrbStack DNS |
+| `VercelSandboxProvider` | Vercel Sandbox infrastructure |
+| `SpritesSandboxProvider` | sprites.dev cloud VMs |
+
+### SDK Usage Pattern
+
+```typescript
+import { createClient, LocalProvider } from "browserd";
+
+const { sandbox, manager, createSession } = await createClient({
+  provider: new LocalProvider({ port: 3000 })
+});
+
+const browser = await createSession();
+await browser.navigate("https://example.com");
+await browser.click("button.submit");
+await browser.close();
+await manager.destroy(sandbox.id);
 ```
 
 ## Key Environment Variables
 
+### Server
 - `PORT` (3000) / `HOST` (0.0.0.0) - Server binding
 - `HEADLESS` (false) - Headless mode
 - `VIEWPORT_WIDTH` (1280) / `VIEWPORT_HEIGHT` (720)
+- `MAX_SESSIONS` (10) - Maximum concurrent sessions
+- `SESSION_IDLE_TIMEOUT` (300000) - Idle timeout (5 min)
+- `SESSION_MAX_LIFETIME` (3600000) - Max lifetime (1 hour)
+
+### Stealth
 - `REBROWSER_PATCHES_RUNTIME_FIX_MODE` (alwaysIsolated) - CDP leak prevention
+- `REBROWSER_PATCHES_SOURCE_URL` (jquery.min.js) - Disguise sourceURL
+- `REBROWSER_PATCHES_UTILITY_WORLD_NAME` (util) - Hide utility world
 
 ## Testing Notes
 
-- Unit tests (`src/**/*.test.ts`) run without a browser
-- Integration/E2E tests require Chromium - use Docker: `bun run docker:test`
-- Test setup in `tests/helpers/setup.ts` detects browser availability
-- Stealth tests validate anti-bot evasion against real detector scripts
+- **Unit tests** (`src/**/*.test.ts`) - Run without browser
+- **Integration/E2E tests** - Require Chromium, use Docker: `bun run docker:test`
+- **Test setup** in `tests/helpers/setup.ts` detects browser availability
+- **Stealth tests** validate anti-bot evasion against real detector scripts
+- Tests auto-skip when browser support unavailable
 
 ## Important Patterns
 
-1. **rebrowser-playwright** - Stealth wrapper around Playwright that patches CDP leaks. Must use `alwaysIsolated` mode with context bridge for main context operations.
+### rebrowser-playwright
 
-2. **Command Serialization** - All Playwright commands go through `CommandQueue` to prevent race conditions and add human-like timing delays.
+Stealth wrapper around Playwright that patches CDP leaks. Must use `alwaysIsolated` mode. Main context operations go through the context bridge (`src/stealth/context-bridge.ts`).
 
-3. **Health Endpoints** - Kubernetes-compatible: `/livez` (always OK), `/readyz` (browser ready check), `/health` (full status).
+### Command Serialization
 
-4. **Zero Production Dependencies** - The server runs with only Bun built-ins and dev dependencies.
+All Playwright commands go through `CommandQueue` to:
+- Prevent race conditions
+- Add human-like timing delays
+- Handle errors consistently
+
+### Human Behavior Emulation
+
+- **Mouse Movement** - Bezier curves with micro-jitter
+- **Typing** - Variable delays, typo simulation
+- **Timing** - Configurable delays between actions
+
+### Health Endpoints (Kubernetes)
+
+- `/livez` - Always OK if server running
+- `/readyz` - OK only if browser ready
+- `/health` - Full status with session info
+
+### Zero Production Dependencies
+
+Server runs with only Bun built-ins + dev dependencies. The bundle (`bun run bundle`) creates a single deployable file.
 
 ## Sprites.dev Integration
-
-Browserd can run on [sprites.dev](https://sprites.dev) cloud infrastructure using the `SpritesSandboxProvider`.
-
-### Sprite CLI Usage
 
 ```bash
 # List sprites
 sprite list
 
-# Execute command on a sprite
-sprite -s <sprite-name> exec <command>
-
-# Execute shell commands (use bash -c for pipes/redirects)
-sprite -s sb1 exec bash -c "ps aux | grep browserd"
+# Execute command on sprite
+sprite -s <name> exec <command>
 
 # Manage services
-sprite -s sb1 exec sprite-env services list
-sprite -s sb1 exec sprite-env services delete <service-name>
+sprite -s <name> exec sprite-env services list
+sprite -s <name> exec sprite-env services delete browserd
 
-# Port forwarding (for WebSocket access)
-sprite proxy -s <sprite-name> <local-port>:<remote-port>
+# Port forwarding
+sprite proxy -s <name> <local>:<remote>
+
+# Read sprite documentation
+sprite -s <name> exec cat /.sprite/llm.txt
+sprite -s <name> exec cat /.sprite/docs/agent-context.md
 ```
 
-### Sprite Documentation
-
-When you need information about sprite CLI usage, services, checkpoints, or environment details, read the sprite's built-in documentation:
+### Deploying to Sprites
 
 ```bash
-# Main entry point - lists available documentation
-sprite -s <sprite-name> exec cat /.sprite/llm.txt
-
-# Environment overview (services, checkpoints, network policy)
-sprite -s <sprite-name> exec cat /.sprite/docs/agent-context.md
-
-# Service management
-sprite -s <sprite-name> exec sprite-env --help
-sprite -s <sprite-name> exec sprite-env services --help
-```
-
-### Testing with Sprites
-
-```bash
-# Run the sprites provider test (requires SPRITE_TOKEN)
-SPRITE_TOKEN=<your-token> bun scripts/test-sprites-provider.ts <sprite-name>
-
-# Build and deploy bundle to sprite
+# Build bundle
 bun run bundle
-sprite -s sb1 exec sprite-env services delete browserd  # Stop existing service first
-# The test script auto-deploys the bundle
+
+# Delete existing service
+sprite -s <name> exec sprite-env services delete browserd
+
+# Run test (auto-deploys)
+SPRITE_TOKEN=<token> bun scripts/test-sprites-provider.ts <name>
 ```
 
-### Bundle Deployment
+## AI Integration
 
-When making changes to browserd server code:
-1. Rebuild the bundle: `bun run bundle`
-2. Delete the existing service: `sprite -s <name> exec sprite-env services delete browserd`
-3. Run the test or redeploy - the provider will upload the new bundle
+The SDK includes Vercel AI SDK integration (`browserd/ai`):
+
+```typescript
+import { createBrowserTool } from "browserd/ai";
+import { LocalProvider } from "browserd/providers";
+
+const browserTool = await createBrowserTool({
+  provider: new LocalProvider({ port: 3000 }),
+});
+
+// Use with AI SDK generateText/streamText
+```
+
+See `examples/browser-agent/index.ts` for complete example.
+
+## Error Codes
+
+| Code | Description |
+|------|-------------|
+| `TIMEOUT` | Operation timed out |
+| `SELECTOR_ERROR` | Element not found |
+| `NAVIGATION_ERROR` | Navigation failed |
+| `SESSION_LIMIT_REACHED` | Max sessions exceeded |
+| `SESSION_NOT_FOUND` | Session doesn't exist |
+| `CONNECTION_CLOSED` | WebSocket closed |
+| `COMMAND_FAILED` | Command execution failed |

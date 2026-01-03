@@ -1,5 +1,5 @@
 /**
- * Local Docker Provider
+ * Docker Container Provider
  *
  * Provider for running browserd in local Docker containers.
  * Simulates remote provider behavior by copying a pre-built JS bundle tarball
@@ -10,9 +10,9 @@
  */
 
 import path from "node:path";
-import { BrowserdError } from "../errors";
-import type { CreateSandboxOptions, SandboxInfo } from "../types";
-import type { LocalSandboxProviderOptions, SandboxProvider } from "./types";
+import { BrowserdError } from "../../errors";
+import type { CreateSandboxOptions, SandboxInfo } from "../../types";
+import type { SandboxProvider, SandboxProviderOptions } from "../types";
 
 // Single bundled tarball (architecture-agnostic JS bundle)
 const BUNDLE_TARBALL = "bundle/browserd.tar.gz";
@@ -28,15 +28,38 @@ interface ContainerEntry {
 }
 
 /**
- * Local Docker Provider implementation
+ * Options for Docker Container Provider
+ */
+export interface DockerContainerProviderOptions extends SandboxProviderOptions {
+	/** Run browser in headed mode with Xvfb (default: true) */
+	headed?: boolean;
+	/** Docker image name (default: 'browserd-sandbox') */
+	imageName?: string;
+	/** Container name prefix (default: 'browserd') */
+	containerNamePrefix?: string;
+	/** Timeout for ready check in ms (default: 60000) */
+	readyTimeout?: number;
+	/** Working directory to mount (default: process.cwd()) */
+	workingDir?: string;
+	/** Enable debug logging for timing analysis (default: false) */
+	debug?: boolean;
+}
+
+/**
+ * @deprecated Use DockerContainerProviderOptions instead
+ */
+export type LocalSandboxProviderOptions = DockerContainerProviderOptions;
+
+/**
+ * Docker Container Provider implementation
  *
  * Runs browserd in local Docker containers for development and testing.
  * Simulates remote provider behavior by deploying a pre-built JS bundle.
  * Each container gets a unique hostname via OrbStack DNS (container-name.orb.local),
  * eliminating port conflicts when running multiple instances.
  */
-export class LocalSandboxProvider implements SandboxProvider {
-	readonly name = "local";
+export class DockerContainerProvider implements SandboxProvider {
+	readonly name = "docker";
 
 	private headed: boolean;
 	private imageName: string;
@@ -47,7 +70,7 @@ export class LocalSandboxProvider implements SandboxProvider {
 	private containers = new Map<string, ContainerEntry>();
 	private debug: boolean;
 
-	constructor(options: LocalSandboxProviderOptions = {}) {
+	constructor(options: DockerContainerProviderOptions = {}) {
 		this.headed = options.headed ?? true;
 		this.imageName = options.imageName ?? "browserd-sandbox";
 		this.containerNamePrefix = options.containerNamePrefix ?? "browserd";
@@ -60,7 +83,7 @@ export class LocalSandboxProvider implements SandboxProvider {
 	private log(message: string, startTime?: number): void {
 		if (!this.debug) return;
 		const elapsed = startTime ? ` [${Date.now() - startTime}ms]` : "";
-		console.log(`[LocalProvider]${elapsed} ${message}`);
+		console.log(`[DockerProvider]${elapsed} ${message}`);
 	}
 
 	/**
@@ -88,7 +111,7 @@ export class LocalSandboxProvider implements SandboxProvider {
 		this.log("ensureBundleTarball() completed", stepStart);
 
 		// Generate unique container name and ID
-		const sandboxId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+		const sandboxId = `docker-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 		const containerName = `${this.containerNamePrefix}-${sandboxId.slice(-8)}`;
 
 		// Use OrbStack DNS: container-name.orb.local
@@ -152,7 +175,7 @@ export class LocalSandboxProvider implements SandboxProvider {
 			// Cleanup on failure
 			await this.destroy(sandboxId).catch(() => {});
 			throw BrowserdError.sandboxCreationFailed(
-				`Failed to start local Docker container: ${err instanceof Error ? err.message : String(err)}`,
+				`Failed to start Docker container: ${err instanceof Error ? err.message : String(err)}`,
 				err instanceof Error ? err : undefined,
 			);
 		}

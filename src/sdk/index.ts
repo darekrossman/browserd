@@ -49,17 +49,25 @@ export {
 } from "./create-client";
 // Errors
 export { BrowserdError, type BrowserdErrorCode } from "./errors";
-// Providers
-export { LocalSandboxProvider } from "./providers/local";
-export { SpritesSandboxProvider } from "./providers/sprites";
 export type {
+	DockerContainerProviderOptions,
+	LocalProviderOptions,
+	/** @deprecated Use DockerContainerProviderOptions instead */
 	LocalSandboxProviderOptions,
 	SandboxProvider,
 	SandboxProviderOptions,
 	SpritesSandboxProviderOptions,
 	VercelSandboxProviderOptions,
-} from "./providers/types";
-export { VercelSandboxProvider } from "./providers/vercel";
+} from "./providers";
+// Providers
+export {
+	DockerContainerProvider,
+	LocalProvider,
+	/** @deprecated Use DockerContainerProvider instead */
+	LocalSandboxProvider,
+	SpritesSandboxProvider,
+	VercelSandboxProvider,
+} from "./providers";
 export type { SandboxManagerOptions } from "./sandbox-manager";
 // Sandbox management
 export { SandboxManager } from "./sandbox-manager";

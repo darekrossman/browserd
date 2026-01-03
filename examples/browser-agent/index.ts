@@ -1,54 +1,24 @@
-/**
- * AI Browser Tool Example
- *
- * This example demonstrates using the browserd AI SDK tool with Vercel AI SDK
- * to enable an AI agent to control a browser with automatic session management.
- *
- * Requirements:
- * - A sandbox provider (Vercel, Sprites, or Local Docker)
- * - AI Gateway API key (or another AI SDK compatible provider)
- *
- * The AI browser tool automatically:
- * - Creates a sandbox on first use
- * - Manages browser sessions
- * - Returns sessionId for the agent to track
- * - Cleans up via closeSession operation
- */
-
 import { gateway, stepCountIs, ToolLoopAgent } from "ai";
-import { createClient, VercelSandboxProvider } from "@/sdk";
-import { createBrowserTool } from "@/sdk/ai";
+import { createClient, LocalProvider } from "@/sdk";
+import { createTaskTool } from "./task-tool";
 
 async function main() {
-	// Create a provider for the browser tool. If sandboxId is not provided,
-	// or the sandbox is not found, a new one will be created.
-	const provider = new VercelSandboxProvider({
-		sandboxId: "sbx_hVTBO6rBAnsOYeV9HABo9eInJWvK",
-		defaultTimeout: 60 * 60000, // 1 hour
-	});
-
-	const client = await createClient({ provider });
-
-	// List and close all existing sessions
-	const sessionsResponse = await client.listSessions();
-	for (const session of sessionsResponse.sessions) {
-		await client.destroySession(session.id);
-	}
-
-	const browserTool = createBrowserTool({ provider });
+	const provider = new LocalProvider();
 
 	console.log("\nStarting AI task...\n");
 
 	try {
 		const agent = new ToolLoopAgent({
 			model: gateway("anthropic/claude-opus-4-5"),
-			tools: { browser: browserTool },
+			instructions:
+				"You are a helpful agent that only uses the task tool to answer questions and perform tasks for the user.",
+			tools: { task: createTaskTool(provider) },
 			stopWhen: stepCountIs(50),
 		});
 
 		const stream = await agent.stream({
 			prompt:
-				"go to npmjs.com and create an account using my email address darek@subpopular.dev, my name is Darek Rossman. My preferred username is 'subpopular'. If the username is not available, stop. Use password 'Lightspeed700'",
+				"visit the top tech news sites and give me a report of the top headlines for today",
 		});
 
 		for await (const chunk of stream.fullStream) {
@@ -74,6 +44,7 @@ async function main() {
 		console.log("\nTask complete");
 
 		// Clean up all remaining sessions
+		const client = await createClient({ provider });
 		const sessionsResponse = await client.listSessions();
 		for (const session of sessionsResponse.sessions) {
 			await client.destroySession(session.id);

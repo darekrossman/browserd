@@ -1,103 +1,107 @@
 # browserd
 
-A cloud browser service that runs headful Chromium in a Docker container, providing live visual streaming via CDP screencast and remote control through a multiplexed WebSocket.
+A cloud browser service for remote browser automation with stealth capabilities. Runs headful Chromium with live visual streaming via CDP screencast and remote control through WebSocket/SSE transports.
+
+**Two Components:**
+- **Browserd Server** - The cloud browser service that hosts Chromium sessions
+- **Browserd SDK** - TypeScript client library for connecting to and controlling browserd instances
 
 ## Features
 
 - **Live Video Streaming** - Real-time JPEG frames via CDP screencast at configurable quality/FPS
 - **Remote Input Control** - Mouse and keyboard events dispatched via CDP
 - **Playwright RPC** - Full Playwright command execution (navigate, click, type, etc.)
-- **WebSocket Protocol** - Single multiplexed connection for frames, commands, and input
-- **Session Management** - REST API for creating and managing browser sessions
-- **Health Endpoints** - Kubernetes-compatible liveness and readiness probes
+- **Multi-Session Support** - Run multiple isolated browser sessions concurrently
+- **WebSocket & SSE Transports** - WebSocket for low latency, SSE fallback for HTTP-only environments
+- **Stealth Mode** - Anti-bot evasion for DataDome, PerimeterX, Cloudflare (via rebrowser-playwright)
+- **Human Behavior Emulation** - Realistic mouse movements, typing patterns, and timing
+- **Multiple Deployment Options** - Local Docker, Vercel Sandbox, Sprites.dev, or self-hosted
 - **Web Viewer** - Built-in HTML/Canvas viewer for testing and debugging
+- **Health Endpoints** - Kubernetes-compatible liveness and readiness probes
+- **AI Integration** - Vercel AI SDK tool for AI agent browser control
 
-## Installation
+---
+
+# Browserd Server
+
+The browserd server hosts Chromium browser sessions and exposes them through HTTP/WebSocket/SSE APIs.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                              Clients                                │
+│   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐         │
+│   │  Web Viewer  │    │  SDK Client  │    │  AI Agent    │         │
+│   │  (Canvas)    │    │              │    │              │         │
+│   └──────┬───────┘    └──────┬───────┘    └──────┬───────┘         │
+│          │                   │                   │                  │
+│          └───────────────────┼───────────────────┘                  │
+│                              │                                      │
+│              WebSocket / SSE / HTTP Transport                       │
+└──────────────────────────────┼──────────────────────────────────────┘
+                               │
+┌──────────────────────────────┼──────────────────────────────────────┐
+│                        Browserd Server                              │
+│                              │                                      │
+│   ┌──────────────────────────┴────────────────────────────┐        │
+│   │                     HTTP Server                        │        │
+│   │  • REST API (/api/sessions)                           │        │
+│   │  • WebSocket upgrade (/sessions/:id/ws)               │        │
+│   │  • SSE stream (/sessions/:id/stream)                  │        │
+│   │  • Viewer UI (/sessions/:id/viewer)                   │        │
+│   └───────────┬─────────────────────────────┬─────────────┘        │
+│               │                             │                       │
+│   ┌───────────┴───────────┐   ┌─────────────┴───────────┐          │
+│   │   SessionManager      │   │      WSHandler          │          │
+│   │  • Session lifecycle  │   │  • Message routing      │          │
+│   │  • Garbage collection │   │  • Client tracking      │          │
+│   │  • Session isolation  │   │  • Frame broadcasting   │          │
+│   └───────────┬───────────┘   └─────────────┬───────────┘          │
+│               │                             │                       │
+│   ┌───────────┴───────────┐   ┌─────────────┴───────────┐          │
+│   │  CDPSessionManager    │   │     CommandQueue        │          │
+│   │  • Screencast (JPEG)  │   │  • Serialize commands   │          │
+│   │  • Input dispatch     │   │  • Human-like timing    │          │
+│   │  • Human emulation    │   │  • Error handling       │          │
+│   └───────────┬───────────┘   └─────────────┬───────────┘          │
+│               │                             │                       │
+│   ┌───────────┴─────────────────────────────┴───────────┐          │
+│   │                 rebrowser-playwright                 │          │
+│   │  • Stealth patches (CDP leak prevention)            │          │
+│   │  • Context bridge (alwaysIsolated mode)             │          │
+│   │  • Fingerprint spoofing                             │          │
+│   └─────────────────────────┬───────────────────────────┘          │
+│                             │                                       │
+└─────────────────────────────┼───────────────────────────────────────┘
+                              │
+                ┌─────────────┴─────────────┐
+                │   Chromium (headful)      │
+                │   + Xvfb (virtual display)│
+                └───────────────────────────┘
+```
+
+## Quick Start
 
 ```bash
 # Install dependencies
 bun install
 
-# Or with npm
-npm install
-```
-
-## Quick Start
-
-### Running the Server
-
-```bash
-# Development mode
+# Start development server
 bun run dev
-
-# Production mode
-bun run start
 ```
 
-The server starts on `http://localhost:3000` by default.
-
-### Viewing the Browser
-
-Open `http://localhost:3000/` in your browser to see the live viewer with mouse/keyboard control.
-
-### Connecting via WebSocket
-
-```javascript
-const ws = new WebSocket('ws://localhost:3000/ws');
-
-ws.onmessage = (event) => {
-  const msg = JSON.parse(event.data);
-
-  if (msg.type === 'frame') {
-    // Display JPEG frame
-    const img = new Image();
-    img.src = `data:image/jpeg;base64,${msg.data}`;
-  }
-
-  if (msg.type === 'result') {
-    // Command result
-    console.log('Command result:', msg);
-  }
-};
-
-// Send a navigation command
-ws.send(JSON.stringify({
-  type: 'cmd',
-  id: 'nav-1',
-  method: 'navigate',
-  params: { url: 'https://example.com' }
-}));
-```
-
-## Configuration
-
-Environment variables:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `3000` | Server port |
-| `HOST` | `0.0.0.0` | Server hostname |
-| `HEADLESS` | `false` | Run browser in headless mode |
-| `VIEWPORT_WIDTH` | `1280` | Browser viewport width |
-| `VIEWPORT_HEIGHT` | `720` | Browser viewport height |
-| `DEFAULT_URL` | `about:blank` | Initial page URL |
-| `COMMAND_TIMEOUT` | `30000` | Default command timeout (ms) |
-| `USE_HTTPS` | `false` | Use HTTPS in session URLs |
+Open `http://localhost:3000/` to see the web viewer.
 
 ## HTTP API
 
 ### Health Endpoints
 
 ```bash
-# Full health status
-GET /health
-GET /healthz
-
-# Liveness probe (always returns 200 if server is running)
-GET /livez
-
-# Readiness probe (returns 200 only if browser is ready)
-GET /readyz
+GET /health      # Full health status (browser, sessions, memory)
+GET /healthz     # Alias for /health
+GET /livez       # Liveness probe (always 200 if server running)
+GET /readyz      # Readiness probe (200 only if browser ready)
 ```
 
 ### Sessions API
@@ -108,147 +112,91 @@ POST /api/sessions
 Content-Type: application/json
 
 {
-  "viewport": { "width": 1920, "height": 1080 }  // optional
+  "viewport": { "width": 1920, "height": 1080 },
+  "profile": "chrome-mac",
+  "initialUrl": "https://example.com"
 }
 
 # Response: 201 Created
 {
-  "id": "session-1234567890-abc123",
+  "id": "sess-abc123",
   "status": "ready",
-  "wsUrl": "ws://localhost:3000/ws",
-  "createdAt": "2024-01-01T00:00:00.000Z",
-  "lastActivity": "2024-01-01T00:00:00.000Z",
-  "viewport": { "width": 1920, "height": 1080 }
+  "wsUrl": "ws://localhost:3000/sessions/sess-abc123/ws",
+  "streamUrl": "http://localhost:3000/sessions/sess-abc123/stream",
+  "inputUrl": "http://localhost:3000/sessions/sess-abc123/input",
+  "viewerUrl": "http://localhost:3000/sessions/sess-abc123/viewer",
+  "viewport": { "width": 1920, "height": 1080 },
+  "createdAt": 1704067200000
 }
 
 # List all sessions
 GET /api/sessions
 
-# Get a specific session
+# Get session details
 GET /api/sessions/:id
 
 # Delete a session
 DELETE /api/sessions/:id
 ```
 
-### Viewer
+### Viewer Endpoints
 
 ```bash
-# HTML viewer with live streaming and controls
-GET /
-GET /viewer
+GET /sessions/:id/viewer    # Single session viewer
+GET /sessions/all           # Grid viewer for all sessions
+GET /                       # Redirects to first session's viewer
 ```
 
-## WebSocket Protocol
+## Transport Layers
 
-Connect to `ws://localhost:3000/ws` for bidirectional communication.
+### WebSocket (Recommended)
 
-### Client → Server Messages
+Connect to `ws://localhost:3000/sessions/:id/ws` for bidirectional communication.
 
-#### Command Message
-Execute a Playwright command:
+**Client → Server Messages:**
 
-```json
-{
-  "type": "cmd",
-  "id": "unique-id",
-  "method": "navigate",
-  "params": { "url": "https://example.com" }
-}
+```javascript
+// Command message (execute Playwright action)
+{ "type": "cmd", "id": "nav-1", "method": "navigate", "params": { "url": "https://example.com" } }
+
+// Input message (mouse/keyboard)
+{ "type": "input", "device": "mouse", "action": "click", "x": 100, "y": 200, "button": "left" }
+{ "type": "input", "device": "key", "action": "press", "key": "Enter" }
+
+// Ping (latency measurement)
+{ "type": "ping", "t": 1704067200000 }
 ```
 
-#### Input Message
-Send mouse/keyboard input:
+**Server → Client Messages:**
 
-```json
-{
-  "type": "input",
-  "device": "mouse",
-  "action": "click",
-  "x": 100,
-  "y": 200,
-  "button": "left"
-}
+```javascript
+// Frame message (JPEG video frame)
+{ "type": "frame", "format": "jpeg", "data": "<base64>", "viewport": { "w": 1280, "h": 720, "dpr": 1 }, "timestamp": 1704067200000 }
+
+// Result message (command response)
+{ "type": "result", "id": "nav-1", "ok": true, "result": { "url": "https://example.com", "title": "Example" } }
+{ "type": "result", "id": "nav-1", "ok": false, "error": { "code": "TIMEOUT", "message": "..." } }
+
+// Event message (system events)
+{ "type": "event", "name": "ready", "data": { "viewport": { "w": 1280, "h": 720 } } }
+
+// Pong (response to ping)
+{ "type": "pong", "t": 1704067200000 }
 ```
 
-```json
-{
-  "type": "input",
-  "device": "key",
-  "action": "press",
-  "key": "Enter",
-  "code": "Enter"
-}
-```
+### Server-Sent Events (SSE)
 
-#### Ping Message
-Keep-alive ping:
+For HTTP-only environments, use SSE for receiving frames and HTTP POST for sending input.
 
-```json
-{
-  "type": "ping",
-  "t": 1704067200000
-}
-```
+```bash
+# Receive frames via SSE
+GET /sessions/:id/stream
 
-### Server → Client Messages
+# Send input/commands via HTTP POST
+POST /sessions/:id/input
+Content-Type: application/json
 
-#### Frame Message
-JPEG video frame:
-
-```json
-{
-  "type": "frame",
-  "data": "<base64-encoded-jpeg>",
-  "format": "jpeg",
-  "viewport": { "w": 1280, "h": 720, "dpr": 1 },
-  "ts": 1704067200000
-}
-```
-
-#### Result Message
-Command execution result:
-
-```json
-{
-  "type": "result",
-  "id": "unique-id",
-  "ok": true,
-  "result": { "url": "https://example.com" }
-}
-```
-
-```json
-{
-  "type": "result",
-  "id": "unique-id",
-  "ok": false,
-  "error": {
-    "code": "TIMEOUT",
-    "message": "Waiting for selector '#missing' timed out"
-  }
-}
-```
-
-#### Event Message
-System events:
-
-```json
-{
-  "type": "event",
-  "name": "ready",
-  "data": { "viewport": { "w": 1280, "h": 720, "dpr": 1 } }
-}
-```
-
-#### Pong Message
-Response to ping:
-
-```json
-{
-  "type": "pong",
-  "t": 1704067200000
-}
+{ "type": "input", "device": "mouse", "action": "click", "x": 100, "y": 200 }
 ```
 
 ## Available Commands
@@ -256,17 +204,16 @@ Response to ping:
 | Method | Params | Description |
 |--------|--------|-------------|
 | `navigate` | `{ url, timeout?, waitUntil? }` | Navigate to URL |
-| `click` | `{ selector, timeout? }` | Click element |
+| `click` | `{ selector, timeout?, button?, delay? }` | Click element |
 | `dblclick` | `{ selector, timeout? }` | Double-click element |
-| `type` | `{ selector, text, delay? }` | Type text (appends) |
-| `fill` | `{ selector, value }` | Fill input (replaces) |
-| `press` | `{ selector?, key }` | Press keyboard key |
 | `hover` | `{ selector, timeout? }` | Hover over element |
-| `scroll` | `{ selector?, x?, y? }` | Scroll element or page |
-| `waitForSelector` | `{ selector, state?, timeout? }` | Wait for element |
-| `evaluate` | `{ expression }` | Execute JavaScript |
-| `screenshot` | `{ type?, quality?, fullPage?, selector? }` | Take screenshot |
+| `type` | `{ selector, text, delay? }` | Type text (appends) |
+| `fill` | `{ selector, value }` | Fill input (replaces content) |
+| `press` | `{ key }` | Press key or combination (e.g., "Control+A") |
+| `waitForSelector` | `{ selector, state?, timeout? }` | Wait for element state |
 | `setViewport` | `{ width, height }` | Resize viewport |
+| `evaluate` | `{ expression, args? }` | Execute JavaScript |
+| `screenshot` | `{ fullPage?, type?, quality? }` | Take screenshot |
 | `goBack` | `{}` | Navigate back |
 | `goForward` | `{}` | Navigate forward |
 | `reload` | `{}` | Reload page |
@@ -275,8 +222,8 @@ Response to ping:
 
 ### Mouse Actions
 
-| Action | Description | Required Params |
-|--------|-------------|-----------------|
+| Action | Description | Params |
+|--------|-------------|--------|
 | `move` | Move cursor | `x`, `y` |
 | `down` | Press button | `x`, `y`, `button?` |
 | `up` | Release button | `x`, `y`, `button?` |
@@ -286,246 +233,85 @@ Response to ping:
 
 ### Keyboard Actions
 
-| Action | Description | Required Params |
-|--------|-------------|-----------------|
-| `down` | Key down | `key`, `code` |
-| `up` | Key up | `key`, `code` |
-| `press` | Key press (down+up) | `key`, `code`, `text?` |
+| Action | Description | Params |
+|--------|-------------|--------|
+| `down` | Key down | `key` |
+| `up` | Key up | `key` |
+| `press` | Key press | `key`, `text?` |
 
 ### Modifiers
 
-All input events support modifiers:
+All input events support modifier keys:
 
 ```json
-{
-  "modifiers": {
-    "ctrl": true,
-    "shift": false,
-    "alt": false,
-    "meta": false
-  }
-}
+{ "modifiers": { "ctrl": true, "shift": false, "alt": false, "meta": false } }
 ```
 
-## Local Container Testing
+## Stealth & Anti-Detection
 
-The easiest way to test browserd locally is using the sandbox container scripts.
+Browserd uses [rebrowser-playwright](https://github.com/nickmitchko/rebrowser-patches) with additional stealth features:
 
-### Prerequisites
+### Browser Profiles
 
-- Docker and Docker Compose installed
-- `sandbox-node:24-dev` base image available (or modify Dockerfile to use another base)
+| Profile | Description |
+|---------|-------------|
+| `chrome-mac` | Chrome 120 on macOS (default) |
+| `chrome-win` | Chrome 120 on Windows 10 |
+| `chrome-linux` | Chrome 120 on Linux |
+| `firefox-mac` | Firefox on macOS |
+| `firefox-win` | Firefox on Windows |
 
-### Quick Start
+### Fingerprint Spoofing
 
-```bash
-# Start the container (first run installs Chromium, takes ~1-2 min)
-bun run container:start
+- **Canvas** - Random pixel noise to prevent fingerprinting
+- **WebGL** - Fake renderer/vendor strings
+- **Audio** - Randomized audio context parameters
+- **WebRTC** - IP leak prevention
+- **Performance Timing** - Noise added to timing values
+- **Screen Properties** - Consistent screen dimensions
 
-# Run all tests
-bun run container:test
+### Human Behavior Emulation
 
-# Or run specific test suites
-bun run container:test:unit         # Unit tests only
-bun run container:test:integration  # Integration tests (browser required)
-bun run container:test:e2e          # End-to-end tests
+- **Mouse Movement** - Bezier curves with micro-jitter and overshoot
+- **Typing Patterns** - Variable keystroke delays, typo simulation
+- **Scroll Behavior** - Chunked scrolling with variable pauses
+- **Hover Micro-movements** - Small random movements while hovering
+- **Action Timing** - Configurable delays between actions
 
-# Start the server and view in browser
-bun run container:serve
-# Open http://localhost:3000/ in your browser
+### Bot Detection Blocking
 
-# Open a shell in the container
-bun run container:shell        # As root
-bun run container:shell --user # As vercel-sandbox user
+Automatically blocks requests to common bot detection scripts:
+- Cloudflare challenge platform
+- DataDome
+- PerimeterX
+- reCAPTCHA (optional)
 
-# Stop the container
-bun run container:stop
-bun run container:stop --clean # Also remove volumes
-```
+## Configuration
 
-### Available Scripts
+### Environment Variables
 
-| Script | Description |
-|--------|-------------|
-| `./scripts/container-start.sh` | Start container, wait for Chromium bootstrap |
-| `./scripts/container-stop.sh` | Stop container (use `--clean` to remove volumes) |
-| `./scripts/container-shell.sh` | Open shell (use `--user` for vercel-sandbox) |
-| `./scripts/container-serve.sh` | Start browserd server on port 3000 |
-| `./scripts/container-test.sh` | Run tests (args: `unit`, `integration`, `e2e`, or pattern) |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `3000` | Server port |
+| `HOST` | `0.0.0.0` | Server hostname |
+| `HEADLESS` | `false` | Run browser in headless mode |
+| `VIEWPORT_WIDTH` | `1280` | Default viewport width |
+| `VIEWPORT_HEIGHT` | `720` | Default viewport height |
+| `DEFAULT_URL` | `about:blank` | Initial page URL |
+| `COMMAND_TIMEOUT` | `30000` | Command timeout (ms) |
+| `USE_HTTPS` | `false` | Use HTTPS in session URLs |
+| `MAX_SESSIONS` | `10` | Maximum concurrent sessions |
+| `SESSION_IDLE_TIMEOUT` | `300000` | Idle session timeout (5 min) |
+| `SESSION_MAX_LIFETIME` | `3600000` | Max session lifetime (1 hour) |
+| `SESSION_GC_INTERVAL` | `60000` | Garbage collection interval (1 min) |
 
-### Server Options
+### Stealth Environment Variables
 
-```bash
-# Custom initial URL
-./scripts/container-serve.sh --url=https://google.com
-
-# Headless mode
-./scripts/container-serve.sh --headless
-
-# Custom port (also update docker-compose.yml ports)
-./scripts/container-serve.sh --port=3001
-```
-
-## Docker Deployment
-
-### Using Docker Compose
-
-```yaml
-version: '3.8'
-
-services:
-  browserd:
-    build: .
-    ports:
-      - "3000:3000"
-    environment:
-      - PORT=3000
-      - HEADLESS=false
-      - VIEWPORT_WIDTH=1280
-      - VIEWPORT_HEIGHT=720
-    # Required for headful browser
-    volumes:
-      - /tmp/.X11-unix:/tmp/.X11-unix
-    environment:
-      - DISPLAY=:99
-```
-
-### Running in Container
-
-```bash
-# Build the image
-docker build -t browserd .
-
-# Run with default settings
-docker run -p 3000:3000 browserd
-
-# Run with custom viewport
-docker run -p 3000:3000 \
-  -e VIEWPORT_WIDTH=1920 \
-  -e VIEWPORT_HEIGHT=1080 \
-  browserd
-```
-
-## Development
-
-### Project Structure
-
-```
-src/
-├── index.ts                 # Package exports
-├── api/
-│   └── sessions.ts          # Session management API
-├── client/
-│   └── viewer-template.ts   # HTML/JS viewer generator
-├── protocol/
-│   ├── types.ts             # WebSocket message types
-│   ├── commands.ts          # RPC command definitions
-│   └── input-mapper.ts      # Coordinate scaling utilities
-└── server/
-    ├── index.ts             # Main server entry
-    ├── browser-manager.ts   # Chromium lifecycle
-    ├── cdp-session.ts       # CDP screencast & input
-    ├── command-queue.ts     # Serialized command execution
-    ├── ws-handler.ts        # WebSocket message routing
-    └── health.ts            # Health check endpoints
-
-tests/
-├── helpers/
-│   ├── setup.ts             # Test environment setup
-│   └── ws-client.ts         # WebSocket test client
-├── integration/             # Integration tests (require browser)
-│   ├── api.test.ts
-│   ├── browser.test.ts
-│   ├── commands.test.ts
-│   ├── input.test.ts
-│   └── screencast.test.ts
-└── e2e/
-    └── full-flow.test.ts    # End-to-end tests
-```
-
-### Scripts
-
-```bash
-# Development server with hot reload
-bun run dev
-
-# Production server
-bun run start
-
-# Type checking
-bun run check-types
-
-# Run all tests
-bun run test
-
-# Run unit tests only (no browser required)
-bun test src/
-
-# Run integration tests (requires browser/container)
-bun test tests/
-```
-
-### Testing
-
-Unit tests run on any platform:
-
-```bash
-bun test src/
-```
-
-Integration and E2E tests require a browser environment (Docker container with Xvfb):
-
-```bash
-# In container
-bun test tests/
-```
-
-Tests automatically skip when browser support is not available.
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                         Client                               │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
-│  │   Viewer     │  │    SDK       │  │   Custom     │       │
-│  │  (Canvas)    │  │   Client     │  │   Client     │       │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘       │
-│         │                 │                 │               │
-│         └─────────────────┼─────────────────┘               │
-│                           │                                 │
-│                    WebSocket Connection                     │
-└───────────────────────────┼─────────────────────────────────┘
-                            │
-┌───────────────────────────┼─────────────────────────────────┐
-│                      browserd Server                        │
-│                           │                                 │
-│  ┌────────────────────────┴────────────────────────┐       │
-│  │                   WSHandler                      │       │
-│  │  • Route messages (frame/cmd/input/ping)        │       │
-│  │  • Broadcast frames to clients                   │       │
-│  │  • Manage client connections                     │       │
-│  └──────────┬─────────────────────────┬────────────┘       │
-│             │                         │                     │
-│  ┌──────────┴──────────┐   ┌─────────┴─────────┐          │
-│  │   CDPSessionManager │   │   CommandQueue    │          │
-│  │  • Screencast       │   │  • Serialize cmds │          │
-│  │  • Input dispatch   │   │  • Execute via PW │          │
-│  └──────────┬──────────┘   └─────────┬─────────┘          │
-│             │                         │                     │
-│  ┌──────────┴─────────────────────────┴────────────┐       │
-│  │                 BrowserManager                   │       │
-│  │  • Launch/close Chromium                         │       │
-│  │  • Manage context and page                       │       │
-│  └──────────────────────┬──────────────────────────┘       │
-│                         │                                   │
-└─────────────────────────┼───────────────────────────────────┘
-                          │
-              ┌───────────┴───────────┐
-              │   Chromium (headful)  │
-              │   via Playwright      │
-              └───────────────────────┘
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REBROWSER_PATCHES_RUNTIME_FIX_MODE` | `alwaysIsolated` | CDP leak prevention mode |
+| `REBROWSER_PATCHES_SOURCE_URL` | `jquery.min.js` | Disguise sourceURL |
+| `REBROWSER_PATCHES_UTILITY_WORLD_NAME` | `util` | Hide utility world name |
 
 ## Error Codes
 
@@ -536,10 +322,436 @@ Tests automatically skip when browser support is not available.
 | `TIMEOUT` | Operation timed out |
 | `SELECTOR_ERROR` | Element not found |
 | `NAVIGATION_ERROR` | Navigation failed |
-| `EVALUATION_ERROR` | JavaScript evaluation failed |
-| `SCREENSHOT_ERROR` | Screenshot capture failed |
-| `BROWSER_ERROR` | Browser-level error |
-| `INTERNAL_ERROR` | Unexpected server error |
+| `EXECUTION_ERROR` | JavaScript evaluation failed |
+| `SESSION_LIMIT_REACHED` | Maximum sessions exceeded |
+| `SESSION_NOT_FOUND` | Session does not exist |
+
+---
+
+# Browserd SDK
+
+TypeScript client library for connecting to browserd instances.
+
+## Installation
+
+```bash
+# npm
+npm install browserd
+
+# bun
+bun add browserd
+
+# pnpm
+pnpm add browserd
+```
+
+## Quick Start
+
+```typescript
+import { createClient, LocalProvider } from "browserd";
+
+// Create a client with a provider
+const { sandbox, createSession, manager } = await createClient({
+  provider: new LocalProvider({ port: 3000 })
+});
+
+// Create a browser session
+const browser = await createSession();
+
+// Use the browser
+await browser.navigate("https://example.com");
+await browser.click("button.submit");
+await browser.fill("input[name='email']", "user@example.com");
+const screenshot = await browser.screenshot();
+
+// Clean up
+await browser.close();
+await manager.destroy(sandbox.id);
+```
+
+## Providers
+
+Providers abstract the infrastructure that runs browserd. Choose one based on your deployment:
+
+### LocalProvider
+
+Connects to a manually started browserd server (development).
+
+```typescript
+import { LocalProvider } from "browserd/providers";
+
+const provider = new LocalProvider({
+  host: "localhost",    // default
+  port: 3000,           // default
+  readyTimeout: 5000,   // default
+});
+```
+
+### DockerContainerProvider
+
+Runs browserd in Docker containers with unique hostnames (requires OrbStack on macOS).
+
+```typescript
+import { DockerContainerProvider } from "browserd/providers";
+
+const provider = new DockerContainerProvider({
+  headed: true,                       // Run with Xvfb (default)
+  imageName: "browserd-sandbox",      // Docker image name
+  containerNamePrefix: "browserd",    // Container name prefix
+  readyTimeout: 60000,                // Startup timeout
+  debug: false,                       // Enable timing logs
+});
+```
+
+### VercelSandboxProvider
+
+Runs browserd on Vercel Sandbox infrastructure.
+
+```typescript
+import { VercelSandboxProvider } from "browserd/providers";
+
+const provider = new VercelSandboxProvider({
+  runtime: "node24",     // Node.js runtime version
+  headed: true,          // Run with Xvfb
+  devMode: false,        // Quick iteration mode
+  blobBaseUrl: "...",    // Optional: URL to bundle
+});
+```
+
+### SpritesSandboxProvider
+
+Runs browserd on [sprites.dev](https://sprites.dev) cloud infrastructure.
+
+```typescript
+import { SpritesSandboxProvider } from "browserd/providers";
+
+const provider = new SpritesSandboxProvider({
+  token: process.env.SPRITE_TOKEN,    // API token
+  headed: true,                       // Run with Xvfb
+  autoSetup: true,                    // Install deps if missing
+  createCheckpointAfterSetup: true,   // Create checkpoint after setup
+  useLocalProxy: true,                // SSH tunnel for WebSocket
+  readyTimeout: 120000,               // Cold start timeout
+});
+```
+
+## BrowserdClient API
+
+### Connection Methods
+
+```typescript
+const client = new BrowserdClient({ url: "ws://..." });
+
+await client.connect();                    // Establish connection
+await client.close();                      // Close and destroy session
+client.isConnected();                      // Check if connected
+client.getConnectionState();               // "disconnected" | "connecting" | "connected" | "reconnecting"
+client.onConnectionStateChange((state) => {});  // Listen for state changes
+client.onError((error) => {});             // Listen for errors
+await client.ping();                       // Measure latency (returns ms)
+```
+
+### Navigation
+
+```typescript
+await browser.navigate("https://example.com", {
+  waitUntil: "networkidle"   // "load" | "domcontentloaded" | "networkidle"
+});
+await browser.goBack();
+await browser.goForward();
+await browser.reload();
+```
+
+### Interaction
+
+```typescript
+await browser.click("button.submit", {
+  button: "left",    // "left" | "middle" | "right"
+  clickCount: 1,
+  delay: 100,
+  timeout: 30000
+});
+await browser.dblclick("div.item");
+await browser.hover("a.link");
+await browser.type("input", "Hello");      // Appends text
+await browser.fill("input", "Hello");      // Replaces content
+await browser.press("Enter");              // Press key
+await browser.press("Control+A");          // Key combination
+```
+
+### Waiting
+
+```typescript
+await browser.waitForSelector("div.loaded", {
+  state: "visible",   // "visible" | "hidden" | "attached" | "detached"
+  timeout: 30000
+});
+```
+
+### Evaluation
+
+```typescript
+const title = await browser.evaluate<string>("document.title");
+const result = await browser.evaluate("(a, b) => a + b", [1, 2]);
+```
+
+### Screenshots
+
+```typescript
+const screenshot = await browser.screenshot({
+  fullPage: false,
+  type: "png",        // "png" | "jpeg"
+  quality: 80         // For JPEG only
+});
+```
+
+### Viewport
+
+```typescript
+await browser.setViewport(1920, 1080);
+```
+
+## SandboxManager
+
+Manages sandbox lifecycle and session creation.
+
+```typescript
+import { SandboxManager, LocalProvider } from "browserd";
+
+const manager = new SandboxManager({
+  provider: new LocalProvider({ port: 3000 }),
+  clientOptions: { timeout: 30000 }
+});
+
+// Create sandbox and get session methods
+const { sandbox, createSession, listSessions, destroySession } = await manager.create();
+
+// Create sessions
+const browser1 = await createSession({ viewport: { width: 1920, height: 1080 } });
+const browser2 = await createSession({ profile: "chrome-win" });
+
+// List sessions
+const sessions = await listSessions();
+
+// Get existing session client
+const client = await getSession("session-id");
+
+// Cleanup
+await destroySession("session-id");
+await manager.destroy(sandbox.id);
+await manager.destroyAll();  // Destroy all sandboxes
+```
+
+## AI Integration
+
+Browserd integrates with Vercel AI SDK for AI agent browser control.
+
+```typescript
+import { createBrowserTool } from "browserd/ai";
+import { LocalProvider } from "browserd/providers";
+import { anthropic } from "@ai-sdk/anthropic";
+import { generateText } from "ai";
+
+// Create the browser tool
+const browserTool = await createBrowserTool({
+  provider: new LocalProvider({ port: 3000 }),
+});
+
+// Use with AI SDK
+const { text } = await generateText({
+  model: anthropic("claude-sonnet-4-20250514"),
+  tools: { browser: browserTool },
+  maxSteps: 10,
+  prompt: "Go to techcrunch.com and find the top headline"
+});
+```
+
+### Available AI Operations
+
+The browser tool supports these operations:
+- `navigate`, `goBack`, `goForward`, `reload`
+- `click`, `dblclick`, `hover`, `type`, `fill`, `press`
+- `waitForSelector`, `evaluate`, `screenshot`
+- `setViewport`, `closeSession`
+
+The AI agent automatically manages session creation and cleanup.
+
+## Error Handling
+
+```typescript
+import { BrowserdError } from "browserd";
+
+try {
+  await browser.click("#missing-element");
+} catch (error) {
+  if (error instanceof BrowserdError) {
+    switch (error.code) {
+      case "SELECTOR_NOT_FOUND":
+        console.log("Element not found");
+        break;
+      case "TIMEOUT":
+        console.log("Operation timed out");
+        break;
+      case "CONNECTION_CLOSED":
+        console.log("Connection lost");
+        break;
+    }
+  }
+}
+```
+
+### Error Codes
+
+| Code | Description |
+|------|-------------|
+| `CONNECTION_FAILED` | Failed to connect |
+| `CONNECTION_TIMEOUT` | Connection timed out |
+| `CONNECTION_CLOSED` | Connection was closed |
+| `NOT_CONNECTED` | Not connected to server |
+| `RECONNECT_FAILED` | Reconnection failed |
+| `COMMAND_TIMEOUT` | Command timed out |
+| `COMMAND_FAILED` | Command execution failed |
+| `SELECTOR_NOT_FOUND` | Element not found |
+| `NAVIGATION_ERROR` | Navigation failed |
+| `EXECUTION_ERROR` | JavaScript evaluation failed |
+| `SESSION_NOT_FOUND` | Session does not exist |
+| `SESSION_LIMIT_REACHED` | Max sessions exceeded |
+| `SANDBOX_CREATION_FAILED` | Sandbox creation failed |
+| `SANDBOX_TIMEOUT` | Sandbox startup timeout |
+| `PROVIDER_ERROR` | Provider-specific error |
+
+---
+
+# Development
+
+## Project Structure
+
+```
+browserd/
+├── src/
+│   ├── server/                 # Browserd server
+│   │   ├── index.ts            # Main entry (Bun.serve)
+│   │   ├── session-manager.ts  # Multi-session management
+│   │   ├── browser-manager.ts  # Chromium lifecycle
+│   │   ├── cdp-session.ts      # CDP screencast & input
+│   │   ├── command-queue.ts    # Command serialization
+│   │   ├── ws-handler.ts       # WebSocket routing
+│   │   └── health.ts           # Health endpoints
+│   ├── sdk/                    # Client SDK
+│   │   ├── client.ts           # BrowserdClient
+│   │   ├── sandbox-manager.ts  # Sandbox lifecycle
+│   │   ├── providers/          # Infrastructure adapters
+│   │   ├── ai/                 # AI SDK integration
+│   │   └── internal/           # Connection management
+│   ├── stealth/                # Anti-detection
+│   │   ├── profiles.ts         # Browser fingerprints
+│   │   ├── human-behavior.ts   # Human emulation
+│   │   ├── timing.ts           # Action timing
+│   │   └── scripts.ts          # Fingerprint spoofing
+│   ├── protocol/               # Message types
+│   └── client/                 # Web viewer
+├── tests/
+│   ├── integration/            # Integration tests
+│   ├── e2e/                    # End-to-end tests
+│   └── stealth/                # Anti-detection tests
+├── examples/
+│   └── browser-agent/          # AI agent example
+└── scripts/                    # Build & deployment
+```
+
+## Commands
+
+```bash
+# Development
+bun run dev                  # Dev server with hot reload
+bun run start                # Production server
+bun run check-types          # TypeScript type checking
+
+# Testing
+bun run test                 # All tests
+bun run test:unit            # Unit tests (no browser)
+bun run test:integration     # Integration tests (requires browser)
+bun run test:e2e             # End-to-end tests
+bun run test:stealth         # Anti-bot evasion tests
+
+# Docker
+bun run docker:build         # Build sandbox image
+bun run docker:test          # Run tests in container
+bun run docker:shell         # Shell into container
+bun run docker:serve         # Run server in container
+bun run docker:serve:headed  # Headed browser in container
+
+# Build
+bun run bundle               # Build server bundle
+bun run build:sdk            # Build SDK for npm
+
+# Code Quality
+bun run lint                 # Biome linter
+bun run lint:fix             # Auto-fix lint issues
+```
+
+## Local Development
+
+### Without Docker (SDK development)
+
+```bash
+# Terminal 1: Start the server
+bun run dev
+
+# Terminal 2: Run your code
+bun run examples/browser-agent/index.ts
+```
+
+### With Docker (full testing)
+
+```bash
+# Build the sandbox image
+bun run docker:build
+
+# Run all tests
+bun run docker:test
+
+# Or run specific test suites
+bun run docker:test:unit
+bun run docker:test:integration
+bun run docker:test:e2e
+```
+
+## Testing
+
+Unit tests run without a browser:
+
+```bash
+bun run test:unit
+```
+
+Integration/E2E tests require Chromium (use Docker):
+
+```bash
+bun run docker:test
+```
+
+Tests automatically skip when browser support is not available.
+
+## Building
+
+### Server Bundle
+
+Creates a deployable bundle for Sprites.dev/Vercel:
+
+```bash
+bun run bundle
+# Output: bundle/browserd.tar.gz
+```
+
+### SDK Package
+
+Builds the SDK for npm publishing:
+
+```bash
+bun run build:sdk
+# Output: dist/sdk/
+```
 
 ## License
 

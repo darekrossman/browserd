@@ -1,10 +1,11 @@
 /**
- * LocalSandboxProvider E2E Tests
+ * DockerContainerProvider E2E Tests
  *
- * Tests the local Docker provider with real Docker containers.
- * Requires Docker to be installed and running.
+ * Tests the Docker container provider against the SandboxProvider protocol.
+ * Requires Docker to be installed and running (OrbStack recommended).
  *
- * Run with: bun test tests/e2e/local-provider.test.ts
+ * IMPORTANT: These tests are NOT run as part of CI.
+ * Run manually with: bun test src/sdk/providers/docker/index.test.ts
  */
 
 import {
@@ -16,11 +17,17 @@ import {
 	test,
 } from "bun:test";
 import { spawnSync } from "node:child_process";
-import type { BrowserdClient } from "../../src/sdk/client";
-import { LocalSandboxProvider } from "../../src/sdk/providers/local";
-import { SandboxManager } from "../../src/sdk/sandbox-manager";
-import type { CreateSandboxResult } from "../../src/sdk/types";
-import { sleep } from "../helpers/setup";
+import type { BrowserdClient } from "../../client";
+import { SandboxManager } from "../../sandbox-manager";
+import type { CreateSandboxResult } from "../../types";
+import { DockerContainerProvider } from "./index";
+
+/**
+ * Sleep utility
+ */
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * Check if Docker is available (synchronous for test.skipIf)
@@ -52,13 +59,25 @@ function hasDockerImage(): boolean {
 	}
 }
 
+/**
+ * Check if bundle tarball exists
+ */
+function hasBundleTarball(): boolean {
+	try {
+		const file = Bun.file("bundle/browserd.tar.gz");
+		return file.size > 0;
+	} catch {
+		return false;
+	}
+}
+
 // Check Docker availability at module load time (synchronous)
 const dockerAvailable = hasDockerSupport();
 const imageAvailable = dockerAvailable && hasDockerImage();
 
 if (!dockerAvailable) {
 	console.log(
-		"[SKIP] Docker not available - skipping LocalSandboxProvider tests",
+		"[SKIP] Docker not available - skipping DockerContainerProvider tests",
 	);
 } else if (!imageAvailable) {
 	console.log(
@@ -66,8 +85,8 @@ if (!dockerAvailable) {
 	);
 }
 
-describe("LocalSandboxProvider E2E", () => {
-	describe("Provider Lifecycle", () => {
+describe("DockerContainerProvider E2E", () => {
+	describe("Provider Protocol Compliance", () => {
 		let manager: SandboxManager | null = null;
 
 		afterEach(async () => {
@@ -77,12 +96,140 @@ describe("LocalSandboxProvider E2E", () => {
 			}
 			// Allow time for container cleanup
 			await sleep(500);
-		}, 30000); // Container cleanup can take time
+		}, 30000);
+
+		test.skipIf(!dockerAvailable)(
+			"provider has correct name property",
+			async () => {
+				const provider = new DockerContainerProvider();
+				expect(provider.name).toBe("docker");
+			},
+		);
+
+		test.skipIf(!dockerAvailable)(
+			"create() returns valid SandboxInfo",
+			async () => {
+				const provider = new DockerContainerProvider({
+					headed: false,
+					readyTimeout: 60000,
+				});
+
+				manager = new SandboxManager({ provider });
+				const { sandbox } = await manager.create();
+
+				// Verify SandboxInfo structure
+				expect(sandbox.id).toMatch(/^docker-/);
+				expect(sandbox.domain).toMatch(
+					/^http:\/\/browserd-.*\.orb\.local:3000$/,
+				);
+				expect(sandbox.wsUrl).toMatch(
+					/^ws:\/\/browserd-.*\.orb\.local:3000\/ws$/,
+				);
+				expect(sandbox.status).toBe("ready");
+				expect(sandbox.createdAt).toBeGreaterThan(0);
+
+				await manager.destroy(sandbox.id);
+			},
+			{ timeout: 120000 },
+		);
+
+		test.skipIf(!dockerAvailable)(
+			"destroy() removes the sandbox",
+			async () => {
+				const provider = new DockerContainerProvider({
+					headed: false,
+					readyTimeout: 60000,
+				});
+
+				manager = new SandboxManager({ provider });
+				const { sandbox } = await manager.create();
+				const sandboxId = sandbox.id;
+
+				// Destroy and verify
+				await manager.destroy(sandboxId);
+				expect(manager.has(sandboxId)).toBe(false);
+
+				// get() should return undefined
+				const info = await provider.get(sandboxId);
+				expect(info).toBeUndefined();
+			},
+			{ timeout: 120000 },
+		);
+
+		test.skipIf(!dockerAvailable)(
+			"isReady() returns true for running sandbox",
+			async () => {
+				const provider = new DockerContainerProvider({
+					headed: false,
+					readyTimeout: 60000,
+				});
+
+				manager = new SandboxManager({ provider });
+				const { sandbox } = await manager.create();
+
+				const ready = await provider.isReady(sandbox.id);
+				expect(ready).toBe(true);
+
+				await manager.destroy(sandbox.id);
+			},
+			{ timeout: 120000 },
+		);
+
+		test.skipIf(!dockerAvailable)(
+			"isReady() returns false for unknown sandbox",
+			async () => {
+				const provider = new DockerContainerProvider();
+				const ready = await provider.isReady("nonexistent-sandbox");
+				expect(ready).toBe(false);
+			},
+		);
+
+		test.skipIf(!dockerAvailable)(
+			"get() returns sandbox info",
+			async () => {
+				const provider = new DockerContainerProvider({
+					headed: false,
+					readyTimeout: 60000,
+				});
+
+				manager = new SandboxManager({ provider });
+				const { sandbox } = await manager.create();
+
+				const info = await provider.get(sandbox.id);
+				expect(info).toBeDefined();
+				expect(info?.id).toBe(sandbox.id);
+				expect(info?.status).toBe("ready");
+
+				await manager.destroy(sandbox.id);
+			},
+			{ timeout: 120000 },
+		);
+
+		test.skipIf(!dockerAvailable)(
+			"get() returns undefined for unknown sandbox",
+			async () => {
+				const provider = new DockerContainerProvider();
+				const info = await provider.get("nonexistent-sandbox");
+				expect(info).toBeUndefined();
+			},
+		);
+	});
+
+	describe("Provider Lifecycle", () => {
+		let manager: SandboxManager | null = null;
+
+		afterEach(async () => {
+			if (manager) {
+				await manager.destroyAll().catch(() => {});
+				manager = null;
+			}
+			await sleep(500);
+		}, 30000);
 
 		test.skipIf(!dockerAvailable)(
 			"creates and destroys a sandbox",
 			async () => {
-				const provider = new LocalSandboxProvider({
+				const provider = new DockerContainerProvider({
 					headed: false,
 					readyTimeout: 60000,
 				});
@@ -90,10 +237,9 @@ describe("LocalSandboxProvider E2E", () => {
 				manager = new SandboxManager({ provider });
 
 				// Create sandbox
-				const { sandbox, createSession, destroySession } =
-					await manager.create();
+				const { sandbox, createSession } = await manager.create();
 
-				expect(sandbox.id).toMatch(/^local-/);
+				expect(sandbox.id).toMatch(/^docker-/);
 				expect(sandbox.status).toBe("ready");
 				// Uses OrbStack DNS: container-name.orb.local:3000
 				expect(sandbox.wsUrl).toMatch(
@@ -112,25 +258,25 @@ describe("LocalSandboxProvider E2E", () => {
 				expect(session.sessionId).toBeDefined();
 				expect(session.isConnected()).toBe(true);
 
-				// Destroy sandbox - close() destroys the session automatically
+				// Destroy sandbox
 				await session.close();
 				await manager.destroy(sandbox.id);
 				expect(manager.has(sandbox.id)).toBe(false);
 			},
-			{ timeout: 60000 }, // 3 minute timeout for potential image build
+			{ timeout: 120000 },
 		);
 
 		test.skipIf(!dockerAvailable)(
 			"creates multiple concurrent instances with different hostnames",
 			async () => {
-				const provider = new LocalSandboxProvider({
+				const provider = new DockerContainerProvider({
 					headed: false,
 					readyTimeout: 60000,
 				});
 
 				manager = new SandboxManager({ provider });
 
-				// Create two sandboxes
+				// Create two sandboxes concurrently
 				const [result1, result2] = await Promise.all([
 					manager.create(),
 					manager.create(),
@@ -159,7 +305,7 @@ describe("LocalSandboxProvider E2E", () => {
 				await manager.destroyAll();
 				expect(manager.size).toBe(0);
 			},
-			{ timeout: 60000 },
+			{ timeout: 180000 },
 		);
 	});
 
@@ -171,7 +317,7 @@ describe("LocalSandboxProvider E2E", () => {
 		beforeAll(async () => {
 			if (!dockerAvailable) return;
 
-			const provider = new LocalSandboxProvider({
+			const provider = new DockerContainerProvider({
 				headed: false,
 				readyTimeout: 60000,
 			});
@@ -181,7 +327,7 @@ describe("LocalSandboxProvider E2E", () => {
 
 			// Create a session - returns connected client directly
 			client = await sandboxResult.createSession();
-		}, 60000);
+		}, 120000);
 
 		afterAll(async () => {
 			if (client) {
@@ -267,6 +413,22 @@ describe("LocalSandboxProvider E2E", () => {
 		);
 
 		test.skipIf(!dockerAvailable)(
+			"types into elements",
+			async () => {
+				await client.navigate(
+					"data:text/html,<input id='input' type='text' />",
+				);
+				await client.click("#input");
+				await client.type("#input", "Typed text");
+				const result = await client.evaluate<string>(
+					"document.getElementById('input').value",
+				);
+				expect(result).toBe("Typed text");
+			},
+			{ timeout: 30000 },
+		);
+
+		test.skipIf(!dockerAvailable)(
 			"throws error when element not found",
 			async () => {
 				await client.navigate("data:text/html,<div>Empty</div>");
@@ -282,7 +444,7 @@ describe("LocalSandboxProvider E2E", () => {
 		test.skipIf(!dockerAvailable)(
 			"creates sandbox in headed mode with Xvfb",
 			async () => {
-				const provider = new LocalSandboxProvider({
+				const provider = new DockerContainerProvider({
 					headed: true,
 					readyTimeout: 60000,
 				});
@@ -313,7 +475,34 @@ describe("LocalSandboxProvider E2E", () => {
 					await sleep(1000);
 				}
 			},
-			{ timeout: 60000 },
+			{ timeout: 120000 },
+		);
+	});
+
+	describe("Configuration Options", () => {
+		test.skipIf(!dockerAvailable)(
+			"respects custom containerNamePrefix",
+			async () => {
+				const provider = new DockerContainerProvider({
+					headed: false,
+					readyTimeout: 60000,
+					containerNamePrefix: "test-browserd",
+				});
+
+				const manager = new SandboxManager({ provider });
+
+				try {
+					const { sandbox } = await manager.create();
+
+					// Domain should use the custom prefix
+					expect(sandbox.domain).toMatch(/test-browserd-/);
+
+					await manager.destroy(sandbox.id);
+				} finally {
+					await manager.destroyAll().catch(() => {});
+				}
+			},
+			{ timeout: 120000 },
 		);
 	});
 });

@@ -141,8 +141,9 @@ export const VIEWPORT_VARIATIONS = [
  * Get a random viewport from common variations
  */
 export function getRandomViewport(): { width: number; height: number } {
-	const variation = VIEWPORT_VARIATIONS[
-		Math.floor(Math.random() * VIEWPORT_VARIATIONS.length)
-	] ?? VIEWPORT_VARIATIONS[0]!;
+	const variation =
+		VIEWPORT_VARIATIONS[
+			Math.floor(Math.random() * VIEWPORT_VARIATIONS.length)
+		] ?? VIEWPORT_VARIATIONS[0]!;
 	return { width: variation.width, height: variation.height };
 }
