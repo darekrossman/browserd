@@ -239,12 +239,12 @@ export async function handleSessionRequest(
 	// GET /api/sessions/:id - Get session
 	const getMatch = path.match(/^\/api\/sessions\/([^/]+)$/);
 	if (req.method === "GET" && getMatch) {
-		return getSessionResponse(getMatch[1]);
+		return getSessionResponse(getMatch[1]!);
 	}
 
 	// DELETE /api/sessions/:id - Delete session
 	if (req.method === "DELETE" && getMatch) {
-		return deleteSessionResponse(getMatch[1]);
+		return deleteSessionResponse(getMatch[1]!);
 	}
 
 	return null;

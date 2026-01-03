@@ -165,7 +165,7 @@ export function getAdjacentKey(char: string): string {
 	if (!adjacent || adjacent.length === 0) {
 		return char;
 	}
-	const randomAdjacent = adjacent[Math.floor(Math.random() * adjacent.length)];
+	const randomAdjacent = adjacent[Math.floor(Math.random() * adjacent.length)]!;
 	// Preserve case
 	return char === char.toUpperCase()
 		? randomAdjacent.toUpperCase()
@@ -346,7 +346,7 @@ export function generateHumanTypingSequence(
 	}> = [];
 
 	for (let i = 0; i < text.length; i++) {
-		const char = text[i];
+		const char = text[i]!;
 
 		// Simulate occasional typos (2% default)
 		if (Math.random() < typoRate && char.match(/[a-zA-Z0-9]/)) {
@@ -469,7 +469,7 @@ export async function humanDelay(
 		short: [100, 300],
 		medium: [300, 800],
 		long: [800, 2000],
-	};
+	} as const;
 	const [min, max] = ranges[type];
 	await randomSleep(min, max);
 }

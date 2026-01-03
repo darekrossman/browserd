@@ -44,7 +44,7 @@ export class BrowserdError extends Error {
 	readonly details?: unknown;
 
 	/** Original error if this wraps another error */
-	readonly cause?: Error;
+	override readonly cause?: Error;
 
 	constructor(
 		code: BrowserdErrorCode,

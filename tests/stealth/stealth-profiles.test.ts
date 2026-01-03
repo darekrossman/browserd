@@ -87,7 +87,7 @@ describe("Stealth Profiles", () => {
 					passed: boolean;
 				}> = [];
 
-				rows.forEach((row) => {
+				rows.forEach((row: Element) => {
 					const cells = row.querySelectorAll("td");
 					if (cells.length >= 3) {
 						const test = cells[0]?.textContent?.trim() ?? "";
@@ -177,7 +177,7 @@ describe("Stealth Profiles", () => {
 					[];
 				const rows = document.querySelectorAll("table tr");
 
-				rows.forEach((row) => {
+				rows.forEach((row: Element) => {
 					const cells = row.querySelectorAll("td");
 					if (cells.length >= 2) {
 						const name = cells[0]?.textContent?.trim() ?? "";

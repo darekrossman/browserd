@@ -76,7 +76,7 @@ describe("E2E Full Flow", () => {
 				// Session-specific WebSocket: /sessions/{id}/ws
 				const sessionWsMatch = path.match(/^\/sessions\/([^/]+)\/ws$/);
 				if (sessionWsMatch) {
-					const sessionId = sessionWsMatch[1];
+					const sessionId = sessionWsMatch[1]!;
 					if (!sessionManager?.hasSession(sessionId)) {
 						return new Response("Session not found", { status: 404 });
 					}
@@ -147,7 +147,7 @@ describe("E2E Full Flow", () => {
 			expect(frames.length).toBeGreaterThanOrEqual(3);
 
 			// Verify frame structure
-			const frame = frames[0];
+			const frame = frames[0]!;
 			expect(frame.type).toBe("frame");
 			expect(frame.format).toBe("jpeg");
 			expect(frame.data.length).toBeGreaterThan(100);

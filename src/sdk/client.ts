@@ -537,16 +537,16 @@ export class BrowserdClient {
 		});
 
 		if (!response.ok) {
-			const error = await response
+			const error = (await response
 				.json()
-				.catch(() => ({ error: "Unknown error" }));
+				.catch(() => ({ error: "Unknown error" }))) as { error?: string };
 			throw new BrowserdError(
 				"SESSION_ERROR",
 				error.error || `Failed to create session: ${response.status}`,
 			);
 		}
 
-		return response.json();
+		return response.json() as Promise<SessionInfo>;
 	}
 
 	/**
@@ -568,7 +568,7 @@ export class BrowserdClient {
 			);
 		}
 
-		return response.json();
+		return response.json() as Promise<ListSessionsResponse>;
 	}
 
 	/**
@@ -596,7 +596,7 @@ export class BrowserdClient {
 			);
 		}
 
-		return response.json();
+		return response.json() as Promise<SessionInfo>;
 	}
 
 	/**

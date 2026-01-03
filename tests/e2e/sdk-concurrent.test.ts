@@ -104,7 +104,7 @@ describe("SDK Concurrent Connections", () => {
 				];
 
 				const navResults = await Promise.all(
-					clients.map((client, i) => client.navigate(pages[i % pages.length])),
+					clients.map((client, i) => client.navigate(pages[i % pages.length]!)),
 				);
 
 				// All navigations should succeed

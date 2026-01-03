@@ -57,7 +57,7 @@ export class SSEConnectionManager {
 
 	private connectPromise: Promise<void> | null = null;
 	private abortController: AbortController | null = null;
-	private streamReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+	private streamReader: ReadableStreamDefaultReader | null = null;
 
 	constructor(options: SSEConnectionManagerOptions) {
 		// Normalize URL (convert ws:// to http://)

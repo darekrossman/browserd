@@ -549,7 +549,7 @@ export class SessionManager {
 		let evicted = 0;
 
 		for (let i = 0; i < toEvict && i < idleSessions.length; i++) {
-			await this.destroySession(idleSessions[i].id);
+			await this.destroySession(idleSessions[i]!.id);
 			evicted++;
 		}
 

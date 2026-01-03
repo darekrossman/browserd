@@ -70,7 +70,7 @@ export function toModelOutput({ output }: ToModelOutputParams): ModelOutput {
 
 		case "evaluate": {
 			value += `Result type: ${data.resultType}\n`;
-			const resultStr = JSON.stringify(data.result, null, 2);
+			const resultStr = JSON.stringify(data.result, null, 2) ?? "undefined";
 			// Truncate long results
 			if (resultStr.length > 5000) {
 				value += `Result: ${resultStr.slice(0, 5000)}... (truncated)\n`;

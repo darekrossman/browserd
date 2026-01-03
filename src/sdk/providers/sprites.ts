@@ -542,7 +542,10 @@ export class SpritesSandboxProvider implements SandboxProvider {
 				});
 
 				if (response.ok) {
-					const data = await response.json().catch(() => ({}));
+					const data = (await response.json().catch(() => ({}))) as {
+						status?: string;
+						browser?: { ready?: boolean };
+					};
 					if (data.status === "healthy" || data.browser?.ready) {
 						this.log("External connectivity verified");
 						return true;

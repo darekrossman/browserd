@@ -548,7 +548,7 @@ describe("Command Queue Mechanics", () => {
 		});
 
 		expect(results.length).toBe(1);
-		expect(results[0].id).toBe("notify-test");
+		expect(results[0]!.id).toBe("notify-test");
 	});
 
 	test.skipIf(!runTests)("returns error for unknown method", async () => {

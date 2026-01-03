@@ -111,7 +111,7 @@ export const BROWSER_PROFILES: Record<string, BrowserProfile> = {
 export function getRandomProfile(): BrowserProfile {
 	const profiles = Object.values(BROWSER_PROFILES);
 	const index = Math.floor(Math.random() * profiles.length);
-	return profiles[index];
+	return profiles[index]!;
 }
 
 /**
@@ -141,6 +141,8 @@ export const VIEWPORT_VARIATIONS = [
  * Get a random viewport from common variations
  */
 export function getRandomViewport(): { width: number; height: number } {
-	const index = Math.floor(Math.random() * VIEWPORT_VARIATIONS.length);
-	return { ...VIEWPORT_VARIATIONS[index] };
+	const variation = VIEWPORT_VARIATIONS[
+		Math.floor(Math.random() * VIEWPORT_VARIATIONS.length)
+	] ?? VIEWPORT_VARIATIONS[0]!;
+	return { width: variation.width, height: variation.height };
 }

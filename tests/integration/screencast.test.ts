@@ -61,8 +61,8 @@ describe("CDPSessionManager Integration", () => {
 
 		// Should emit ready event
 		expect(receivedEvents.length).toBeGreaterThanOrEqual(1);
-		expect(receivedEvents[0].type).toBe("event");
-		expect((receivedEvents[0] as EventMessage).name).toBe("ready");
+		expect(receivedEvents[0]!.type).toBe("event");
+		expect((receivedEvents[0]! as EventMessage).name).toBe("ready");
 	});
 
 	test.skipIf(!runTests)("starts and stops screencast", async () => {
@@ -117,7 +117,7 @@ describe("CDPSessionManager Integration", () => {
 		expect(receivedFrames.length).toBeGreaterThan(0);
 
 		// Verify frame structure
-		const frame = receivedFrames[0];
+		const frame = receivedFrames[0]!;
 		expect(frame.type).toBe("frame");
 		expect(frame.format).toBe("jpeg");
 		expect(frame.data).toBeDefined();
@@ -149,7 +149,7 @@ describe("CDPSessionManager Integration", () => {
 		expect(receivedFrames.length).toBeGreaterThan(0);
 
 		// Decode base64 and check JPEG magic bytes
-		const frame = receivedFrames[0];
+		const frame = receivedFrames[0]!;
 		const buffer = Buffer.from(frame.data, "base64");
 
 		// JPEG starts with FF D8 FF

@@ -47,8 +47,8 @@ Example workflow:
 Operations:
 - navigate: Go to a URL
 - click: Click on buttons, links, or any element
-- fill: Enter text into form fields (preferred for inputs)
-- type: Type text character by character
+- fill: Enter text into form fields (prefer typing with 'type' over fill for stealth)
+- type: Type text character by character (preferred for form inputs)
 - press: Press keyboard keys (Enter, Tab, Escape, etc.)
 - hover: Hover over an element
 - waitForSelector: Wait for an element to appear or disappear
@@ -66,7 +66,8 @@ Selectors - how to identify elements:
 
 Best practices:
 - Always save and reuse the sessionId from your first call
-- Use 'fill' for form inputs (it clears existing text first)
+- Always use 'type' to enter text into form inputs. 
+- Only use fill to empty existing text in form inputs.
 - Use 'waitForSelector' before clicking elements that load dynamically
 - Use 'evaluate' to extract text content: evaluate("document.querySelector('h1')?.textContent")
 - Take screenshots to verify the page state when debugging

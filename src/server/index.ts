@@ -11,6 +11,7 @@ import {
 	createViewerResponse,
 } from "../client/viewer-template";
 import {
+	type CommandMessage,
 	type InputMessage,
 	type ServerMessage,
 	serializeServerMessage,
@@ -124,7 +125,7 @@ function parseSessionPath(
 ): { sessionId: string; endpoint: string } | null {
 	const match = path.match(/^\/sessions\/([^/]+)\/(ws|stream|input|viewer)$/);
 	if (match) {
-		return { sessionId: match[1], endpoint: match[2] };
+		return { sessionId: match[1]!, endpoint: match[2]! };
 	}
 	return null;
 }
@@ -283,7 +284,7 @@ async function handleSessionInput(
 	}
 
 	try {
-		const body = await req.json();
+		const body = (await req.json()) as { type?: string };
 
 		if (body.type === "input") {
 			// Dispatch input to session's CDP
@@ -293,7 +294,7 @@ async function handleSessionInput(
 
 		if (body.type === "cmd") {
 			// Handle command via session's queue
-			const result = await session.commandQueue.enqueue(body);
+			const result = await session.commandQueue.enqueue(body as CommandMessage);
 			return Response.json(result);
 		}
 
@@ -375,7 +376,7 @@ async function handleSessionApiRequest(req: Request): Promise<Response | null> {
 	// GET /api/sessions/:id - Get session info
 	const getMatch = path.match(/^\/api\/sessions\/([^/]+)$/);
 	if (req.method === "GET" && getMatch) {
-		const session = sessionManager.getSession(getMatch[1]);
+		const session = sessionManager.getSession(getMatch[1]!);
 		if (!session) {
 			return Response.json(
 				{ error: "Session not found", code: "SESSION_NOT_FOUND" },
@@ -401,7 +402,7 @@ async function handleSessionApiRequest(req: Request): Promise<Response | null> {
 
 	// DELETE /api/sessions/:id - Destroy session
 	if (req.method === "DELETE" && getMatch) {
-		const sessionId = getMatch[1];
+		const sessionId = getMatch[1]!;
 
 		const deleted = await sessionManager.destroySession(sessionId);
 		if (!deleted) {
@@ -536,7 +537,7 @@ async function handleRequest(
 		const sessions = sessionManager?.listSessions() ?? [];
 		if (sessions.length > 0) {
 			// If sessions exist, redirect to first one
-			return Response.redirect(`/sessions/${sessions[0].id}/viewer`, 302);
+			return Response.redirect(`/sessions/${sessions[0]!.id}/viewer`, 302);
 		}
 		// No sessions - return info page
 		return new Response(

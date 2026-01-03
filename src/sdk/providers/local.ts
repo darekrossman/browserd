@@ -423,6 +423,9 @@ export class LocalSandboxProvider implements SandboxProvider {
 		options?: { cwd?: string },
 	): Promise<{ stdout: string; stderr: string }> {
 		const [cmd, ...cmdArgs] = args;
+		if (!cmd) {
+			throw new Error("No command specified");
+		}
 
 		const proc = Bun.spawn([cmd, ...cmdArgs], {
 			cwd: options?.cwd,

@@ -15,9 +15,9 @@
  * - Cleans up via closeSession operation
  */
 
-import { gateway, generateText, stepCountIs } from "ai";
-import { VercelSandboxProvider } from "../../src/sdk";
-import { createBrowserTool } from "../../src/sdk/ai";
+import { gateway, stepCountIs, ToolLoopAgent } from "ai";
+import { createClient, VercelSandboxProvider } from "@/sdk";
+import { createBrowserTool } from "@/sdk/ai";
 
 async function main() {
 	// Create a provider for the browser tool. If sandboxId is not provided,
@@ -27,39 +27,57 @@ async function main() {
 		defaultTimeout: 60 * 60000, // 1 hour
 	});
 
-	const browserTool = createBrowserTool({ provider });
+	const client = await createClient({ provider });
 
-	const prompt = `
-    Go to Hacker News (https://news.ycombinator.com) and find the title of the
-    top story on the front page. Return just the title.
-  `;
+	// List and close all existing sessions
+	const sessionsResponse = await client.listSessions();
+	for (const session of sessionsResponse.sessions) {
+		await client.destroySession(session.id);
+	}
+
+	const browserTool = createBrowserTool({ provider });
 
 	console.log("\nStarting AI task...\n");
 
 	try {
-		const { text, steps } = await generateText({
-			model: gateway("anthropic/claude-opus-4.5"),
+		const agent = new ToolLoopAgent({
+			model: gateway("anthropic/claude-opus-4-5"),
 			tools: { browser: browserTool },
-			stopWhen: stepCountIs(25),
-			prompt,
+			stopWhen: stepCountIs(50),
 		});
 
-		console.log("AI Response:", text);
-		console.log("\nSteps taken:", steps.length);
+		const stream = await agent.stream({
+			prompt:
+				"go to npmjs.com and create an account using my email address darek@subpopular.dev, my name is Darek Rossman. My preferred username is 'subpopular'. If the username is not available, stop. Use password 'Lightspeed700'",
+		});
 
-		// Log each step for visibility
-		for (const step of steps) {
-			if (step.toolCalls) {
-				for (const call of step.toolCalls) {
-					console.log(`  - ${call.toolName}`);
-				}
+		for await (const chunk of stream.fullStream) {
+			switch (chunk.type) {
+				case "text-delta":
+					process.stdout.write(chunk.text);
+					break;
+				case "text-end":
+					process.stdout.write("\n");
+					break;
+				case "tool-call":
+					console.log(`\n[Tool Call: ${chunk.toolName}]`, chunk.input);
+					break;
+				case "tool-result":
+					console.log(`\n[Tool Result: ${chunk.toolName}]`, chunk.output);
+					break;
+				case "error":
+					console.log(`[ERROR]`, chunk.error);
+					break;
 			}
 		}
 	} finally {
 		console.log("\nTask complete");
-		// Note: The AI agent should have called closeSession
-		// Sandbox may persist and timeout naturally, or can be
-		// cleaned up separately via provider if needed
+
+		// Clean up all remaining sessions
+		const sessionsResponse = await client.listSessions();
+		for (const session of sessionsResponse.sessions) {
+			await client.destroySession(session.id);
+		}
 	}
 }
 
