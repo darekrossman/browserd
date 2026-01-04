@@ -4,6 +4,7 @@
  */
 
 import type { BrowserdClient } from "../client";
+import type { NotificationProvider } from "../notifications";
 import type { SandboxProvider } from "../providers/types";
 import { SandboxManager } from "../sandbox-manager";
 import type { CreateSessionOptions } from "../types";
@@ -24,9 +25,23 @@ interface SessionState {
 }
 
 /**
+ * Options for the executor
+ */
+interface ExecutorOptions {
+	/**
+	 * Notification provider for human-in-the-loop interventions
+	 */
+	notificationProvider?: NotificationProvider;
+}
+
+/**
  * Create an executor with session state management
  */
-export function createExecutor(provider: SandboxProvider) {
+export function createExecutor(
+	provider: SandboxProvider,
+	options: ExecutorOptions = {},
+) {
+	const { notificationProvider } = options;
 	const state: SessionState = {
 		manager: null,
 		sandboxId: null,
@@ -352,6 +367,52 @@ export function createExecutor(provider: SandboxProvider) {
 					return successResult(
 						operation,
 						{ width: input.width, height: input.height },
+						sessionId,
+					);
+				}
+
+				case "requestHumanIntervention": {
+					if (!input.reason) {
+						return errorResult(
+							operation,
+							"reason is required for requestHumanIntervention",
+							"unknown",
+							sessionId,
+						);
+					}
+					if (!input.instructions) {
+						return errorResult(
+							operation,
+							"instructions is required for requestHumanIntervention",
+							"unknown",
+							sessionId,
+						);
+					}
+					const result = await client.requestIntervention({
+						reason: input.reason,
+						instructions: input.instructions,
+						timeout,
+						// Call notification provider when intervention is created
+						onCreated: notificationProvider
+							? async (info) => {
+									await notificationProvider.notify({
+										interventionId: info.interventionId,
+										sessionId,
+										viewerUrl: info.viewerUrl,
+										reason: info.reason,
+										instructions: info.instructions,
+										createdAt: new Date(),
+									});
+								}
+							: undefined,
+					});
+					return successResult(
+						operation,
+						{
+							interventionId: result.interventionId,
+							viewerUrl: result.viewerUrl,
+							resolvedAt: result.resolvedAt.toISOString(),
+						},
 						sessionId,
 					);
 				}

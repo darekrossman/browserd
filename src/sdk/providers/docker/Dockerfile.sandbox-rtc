@@ -1,0 +1,141 @@
+FROM sandbox-node:24-dev
+
+USER root
+
+# Optional: keep Xvfb available for compatibility testing (not required for CDP screencast)
+ARG INSTALL_XVFB=1
+
+# Set environment variables
+ENV HOME=/home/vercel-sandbox
+ENV BUN_INSTALL=$HOME/.bun
+ENV PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/playwright-browsers
+ENV NODE_PATH=$BUN_INSTALL/install/global/node_modules
+ENV PATH="$BUN_INSTALL/bin:$HOME/.local/bin:${PATH}"
+
+# Sidecar sockets (defaults used by your plan)
+ENV SIDECAR_CONTROL_SOCK=/tmp/browserd-control.sock
+ENV SIDECAR_FRAME_SOCK=/tmp/browserd-frame.sock
+
+# Install system dependencies for Playwright/Chromium (headless) + Python/GStreamer sidecar (WebRTC)
+# Note: libnice is NOT available in Amazon Linux 2023, so we build it from source below
+RUN dnf update -y && \
+    dnf -y install \
+      # Playwright/Chromium deps
+      nss \
+      nspr \
+      atk \
+      at-spi2-atk \
+      cups-libs \
+      libdrm \
+      libxkbcommon \
+      mesa-libgbm \
+      alsa-lib \
+      libXcomposite \
+      libXdamage \
+      libXfixes \
+      libXrandr \
+      pango \
+      cairo \
+      liberation-fonts \
+      mesa-libEGL \
+      gtk3 \
+      dbus-glib \
+      libXScrnSaver \
+      google-noto-color-emoji-fonts \
+      # Python runtime for sidecar (PyGObject) + pip for newer meson
+      python3 \
+      python3-pip \
+      python3-gobject \
+      # GStreamer runtime + plugins (webrtcbin requires libnice which we build from source)
+      gstreamer1 \
+      gstreamer1-plugins-base \
+      gstreamer1-plugins-base-tools \
+      gstreamer1-plugins-good \
+      gstreamer1-plugins-bad-free \
+      # Build dependencies for libnice and gst-plugins-bad (webrtcbin)
+      gstreamer1-devel \
+      gstreamer1-plugins-base-devel \
+      gstreamer1-plugins-bad-free-devel \
+      meson \
+      ninja-build \
+      gcc \
+      gcc-c++ \
+      glib2-devel \
+      openssl-devel \
+      gnutls-devel \
+      gobject-introspection-devel \
+      xz \
+    && if [ "$INSTALL_XVFB" = "1" ]; then dnf -y install xorg-x11-server-Xvfb; fi \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
+
+# Install newer meson via pip (AL2023's meson 0.63.3 is too old for gst-plugins-bad 1.24.10)
+RUN pip3 install --upgrade meson
+
+# Build libsrtp from source using meson (required for DTLS-SRTP in webrtcbin)
+# Amazon Linux 2023 doesn't include libsrtp in its repos
+RUN cd /tmp && \
+    curl -L https://github.com/cisco/libsrtp/archive/refs/tags/v2.6.0.tar.gz | tar xz && \
+    cd libsrtp-2.6.0 && \
+    meson setup build --prefix=/usr --libdir=/usr/lib64 -Dcrypto-library=openssl -Ddefault_library=shared && \
+    ninja -C build && \
+    ninja -C build install && \
+    ldconfig && \
+    cd / && rm -rf /tmp/libsrtp-2.6.0
+
+# Build libnice from source (required for webrtcbin ICE connectivity)
+# Amazon Linux 2023 doesn't include libnice in its repos
+RUN cd /tmp && \
+    curl -L https://github.com/libnice/libnice/archive/refs/tags/0.1.22.tar.gz | tar xz && \
+    cd libnice-0.1.22 && \
+    meson setup build --prefix=/usr --libdir=/usr/lib64 -Dgstreamer=enabled -Dintrospection=enabled && \
+    ninja -C build && \
+    ninja -C build install && \
+    ldconfig && \
+    cd / && rm -rf /tmp/libnice-0.1.22
+
+# Build gst-plugins-bad webrtc plugin from source (the AL2023 package was built without libnice/libsrtp)
+RUN cd /tmp && \
+    curl -L https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.24.10.tar.xz | tar xJ && \
+    cd gst-plugins-bad-1.24.10 && \
+    meson setup build --prefix=/usr --libdir=/usr/lib64 \
+      -Dauto_features=disabled \
+      -Dwebrtc=enabled \
+      -Ddtls=enabled \
+      -Dsrtp=enabled \
+      -Dsctp=enabled && \
+    ninja -C build && \
+    # Install webrtc-related libraries and plugins
+    # First, install the webrtcnice library that webrtcbin depends on (filter out directories)
+    find build/gst-libs/gst/webrtc/nice -maxdepth 1 -name 'libgstwebrtcnice-1.0.so*' -type f -o -name 'libgstwebrtcnice-1.0.so*' -type l | xargs -I{} cp -P {} /usr/lib64/ && \
+    # Then install the GStreamer plugins
+    cp build/ext/webrtc/libgstwebrtc.so /usr/lib64/gstreamer-1.0/ && \
+    cp build/ext/dtls/libgstdtls.so /usr/lib64/gstreamer-1.0/ && \
+    cp build/ext/srtp/libgstsrtp.so /usr/lib64/gstreamer-1.0/ && \
+    cp build/ext/sctp/libgstsctp.so /usr/lib64/gstreamer-1.0/ 2>/dev/null || true && \
+    ldconfig && \
+    cd / && rm -rf /tmp/gst-plugins-bad-1.24.10
+
+# Fail fast during image build if required GStreamer elements are missing
+RUN gst-inspect-1.0 webrtcbin >/dev/null && \
+    gst-inspect-1.0 vp8enc   >/dev/null && \
+    gst-inspect-1.0 jpegdec  >/dev/null && \
+    gst-inspect-1.0 rtpvp8pay >/dev/null
+
+# Create user directories with proper ownership before switching user
+RUN mkdir -p \
+      /home/vercel-sandbox/.bun \
+      /home/vercel-sandbox/.cache \
+      /home/vercel-sandbox/.local/bin \
+      /home/vercel-sandbox/.cache/playwright-browsers && \
+    chown -R vercel-sandbox:vercel-sandbox /home/vercel-sandbox
+
+# Switch to vercel-sandbox user
+USER vercel-sandbox
+
+# Install Bun
+RUN curl -fsSL https://bun.sh/install | bash
+
+# Install rebrowser-playwright and chromium
+RUN bun install -g rebrowser-playwright && \
+    bunx rebrowser-playwright-core install chromium

@@ -29,51 +29,51 @@ The browserd server hosts Chromium browser sessions and exposes them through HTT
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                              Clients                                │
-│   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐         │
-│   │  Web Viewer  │    │  SDK Client  │    │  AI Agent    │         │
-│   │  (Canvas)    │    │              │    │              │         │
-│   └──────┬───────┘    └──────┬───────┘    └──────┬───────┘         │
-│          │                   │                   │                  │
-│          └───────────────────┼───────────────────┘                  │
-│                              │                                      │
-│              WebSocket / SSE / HTTP Transport                       │
-└──────────────────────────────┼──────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│                              Clients                          │
+│   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    │
+│   │  Web Viewer  │    │  SDK Client  │    │  AI Agent    │    │
+│   │  (Canvas)    │    │              │    │              │    │ 
+│   └──────┬───────┘    └──────┬───────┘    └──────┬───────┘    │
+│          │                   │                   │            │
+│          └───────────────────┼───────────────────┘            │
+│                              │                                │
+│              WebSocket / SSE / HTTP Transport                 │
+└──────────────────────────────┼────────────────────────────────┘
                                │
-┌──────────────────────────────┼──────────────────────────────────────┐
-│                        Browserd Server                              │
-│                              │                                      │
-│   ┌──────────────────────────┴────────────────────────────┐        │
-│   │                     HTTP Server                        │        │
-│   │  • REST API (/api/sessions)                           │        │
-│   │  • WebSocket upgrade (/sessions/:id/ws)               │        │
-│   │  • SSE stream (/sessions/:id/stream)                  │        │
-│   │  • Viewer UI (/sessions/:id/viewer)                   │        │
-│   └───────────┬─────────────────────────────┬─────────────┘        │
-│               │                             │                       │
-│   ┌───────────┴───────────┐   ┌─────────────┴───────────┐          │
-│   │   SessionManager      │   │      WSHandler          │          │
-│   │  • Session lifecycle  │   │  • Message routing      │          │
-│   │  • Garbage collection │   │  • Client tracking      │          │
-│   │  • Session isolation  │   │  • Frame broadcasting   │          │
-│   └───────────┬───────────┘   └─────────────┬───────────┘          │
-│               │                             │                       │
-│   ┌───────────┴───────────┐   ┌─────────────┴───────────┐          │
-│   │  CDPSessionManager    │   │     CommandQueue        │          │
-│   │  • Screencast (JPEG)  │   │  • Serialize commands   │          │
-│   │  • Input dispatch     │   │  • Human-like timing    │          │
-│   │  • Human emulation    │   │  • Error handling       │          │
-│   └───────────┬───────────┘   └─────────────┬───────────┘          │
-│               │                             │                       │
-│   ┌───────────┴─────────────────────────────┴───────────┐          │
-│   │                 rebrowser-playwright                 │          │
-│   │  • Stealth patches (CDP leak prevention)            │          │
-│   │  • Context bridge (alwaysIsolated mode)             │          │
-│   │  • Fingerprint spoofing                             │          │
-│   └─────────────────────────┬───────────────────────────┘          │
-│                             │                                       │
-└─────────────────────────────┼───────────────────────────────────────┘
+┌──────────────────────────────┼────────────────────────────────┐
+│                        Browserd Server                        │
+│                              │                                │
+│   ┌──────────────────────────┴───────────────────────────┐    │
+│   │                     HTTP Server                      │    │
+│   │  • REST API (/api/sessions)                          │    │
+│   │  • WebSocket upgrade (/sessions/:id/ws)              │    │
+│   │  • SSE stream (/sessions/:id/stream)                 │    │
+│   │  • Viewer UI (/sessions/:id/viewer)                  │    │
+│   └───────────┬─────────────────────────────┬────────────┘    │
+│               │                             │                 │
+│   ┌───────────┴───────────┐   ┌─────────────┴───────────┐     │
+│   │   SessionManager      │   │      WSHandler          │     │
+│   │  • Session lifecycle  │   │  • Message routing      │     │
+│   │  • Garbage collection │   │  • Client tracking      │     │
+│   │  • Session isolation  │   │  • Frame broadcasting   │     │
+│   └───────────┬───────────┘   └─────────────┬───────────┘     │
+│               │                             │                 │
+│   ┌───────────┴───────────┐   ┌─────────────┴───────────┐     │
+│   │  CDPSessionManager    │   │     CommandQueue        │     │
+│   │  • Screencast (JPEG)  │   │  • Serialize commands   │     │
+│   │  • Input dispatch     │   │  • Human-like timing    │     │
+│   │  • Human emulation    │   │  • Error handling       │     │
+│   └───────────┬───────────┘   └─────────────┬───────────┘     │
+│               │                             │                 │
+│               │     rebrowser-playwright    │                 │
+│   ┌───────────┴─────────────────────────────┴───────────┐     │
+│   │  • Stealth patches (CDP leak prevention)            │     │
+│   │  • Context bridge (alwaysIsolated mode)             │     │
+│   │  • Fingerprint spoofing                             │     │
+│   └─────────────────────────┬───────────────────────────┘     │
+│                             │                                 │
+└─────────────────────────────┼─────────────────────────────────┘
                               │
                 ┌─────────────┴─────────────┐
                 │   Chromium (headful)      │
@@ -573,8 +573,140 @@ The browser tool supports these operations:
 - `click`, `dblclick`, `hover`, `type`, `fill`, `press`
 - `waitForSelector`, `evaluate`, `screenshot`
 - `setViewport`, `closeSession`
+- `requestHumanIntervention` - Request human help for CAPTCHAs and blockers
 
 The AI agent automatically manages session creation and cleanup.
+
+### Human-in-the-Loop (HITL)
+
+When an AI agent encounters obstacles it cannot automate (CAPTCHAs, login walls, complex verifications), it can request human intervention. The tool pauses execution, notifies the user, and resumes once the human completes the task.
+
+#### How It Works
+
+1. **Agent detects a blocker** - Via screenshot analysis or DOM inspection
+2. **Agent requests intervention** - Calls `requestHumanIntervention` with reason and instructions
+3. **Tool generates viewer URL** - Returns a URL with `?intervention=<id>` parameter
+4. **Human resolves the blocker** - Opens the viewer, sees the intervention overlay with instructions
+5. **Human clicks "Mark Complete"** - Signals completion via the viewer UI
+6. **Agent continues** - The tool unblocks and the agent resumes automation
+
+#### Usage Example
+
+```typescript
+import { createBrowserTool } from "browserd/ai";
+import { LocalProvider } from "browserd/providers";
+import { ConsoleNotificationProvider } from "browserd";
+import { anthropic } from "@ai-sdk/anthropic";
+import { generateText } from "ai";
+
+// Create browser tool with notification provider
+const browserTool = await createBrowserTool({
+  provider: new LocalProvider({ port: 3000 }),
+  notificationProvider: new ConsoleNotificationProvider(),
+});
+
+// The agent can now request human help when needed
+const { text } = await generateText({
+  model: anthropic("claude-sonnet-4-20250514"),
+  tools: { browser: browserTool },
+  maxSteps: 20,
+  prompt: `
+    Go to example.com and complete the signup flow.
+    If you encounter a CAPTCHA or verification that you cannot solve,
+    use requestHumanIntervention to ask for help.
+  `
+});
+```
+
+#### The `requestHumanIntervention` Operation
+
+```typescript
+// Input
+{
+  operation: "requestHumanIntervention",
+  sessionId: "sess-abc123",           // Required - must have active session
+  reason: "CAPTCHA detected",          // Why intervention is needed
+  instructions: "Please solve the CAPTCHA and click Mark Complete when done"
+}
+
+// Output (blocks until human completes)
+{
+  status: "success",
+  operation: "requestHumanIntervention",
+  sessionId: "sess-abc123",
+  data: {
+    interventionId: "int-xyz789",
+    viewerUrl: "http://localhost:3000/sessions/sess-abc123/viewer?intervention=int-xyz789",
+    resolvedAt: "2024-01-15T10:30:00.000Z"
+  }
+}
+```
+
+#### Notification Providers
+
+Configure how users are notified when intervention is needed:
+
+**ConsoleNotificationProvider** (default) - Logs to console:
+```typescript
+import { ConsoleNotificationProvider } from "browserd";
+
+const provider = new ConsoleNotificationProvider({
+  prefix: "[HITL]"  // Optional prefix for log messages
+});
+```
+
+**WebhookNotificationProvider** - POST to a URL:
+```typescript
+import { WebhookNotificationProvider } from "browserd";
+
+const provider = new WebhookNotificationProvider({
+  url: "https://your-server.com/webhook",
+  headers: { "Authorization": "Bearer token" },  // Optional
+  timeout: 5000  // Optional, default 10000ms
+});
+
+// Webhook receives:
+// POST { interventionId, sessionId, viewerUrl, reason, instructions, createdAt }
+```
+
+#### Programmatic Completion
+
+Interventions can also be completed via the REST API:
+
+```bash
+# Get intervention details
+GET /api/sessions/:sessionId/intervention/:interventionId
+
+# Mark intervention complete
+POST /api/sessions/:sessionId/intervention/:interventionId/complete
+```
+
+#### Detection Patterns
+
+The agent should detect blockers before requesting intervention. Common patterns:
+
+```typescript
+// CAPTCHA detection via evaluate
+const hasCaptcha = await browser.evaluate(`
+  const indicators = [
+    document.querySelector('iframe[src*="recaptcha"]'),
+    document.querySelector('iframe[src*="hcaptcha"]'),
+    document.querySelector('.g-recaptcha'),
+    document.querySelector('.h-captcha'),
+    document.querySelector('[data-captcha]'),
+  ];
+  return indicators.some(el => el !== null);
+`);
+
+if (hasCaptcha) {
+  await browser.requestHumanIntervention({
+    reason: "CAPTCHA detected on page",
+    instructions: "Please solve the CAPTCHA, then click Mark Complete"
+  });
+}
+```
+
+Visual detection via screenshot is also effective - the agent can analyze screenshots to identify CAPTCHA elements, login walls, or verification prompts.
 
 ## Error Handling
 

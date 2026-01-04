@@ -72,6 +72,18 @@ export type { SandboxManagerOptions } from "./sandbox-manager";
 // Sandbox management
 export { SandboxManager } from "./sandbox-manager";
 
+// Notification providers (Human-in-the-Loop)
+export {
+	ConsoleNotificationProvider,
+	WebhookNotificationProvider,
+	type ConsoleNotificationProviderConfig,
+	type InterventionNotification,
+	type NotificationProvider,
+	type NotificationProviderConfig,
+	type WebhookNotificationProviderConfig,
+	type WebhookPayload,
+} from "./notifications";
+
 // Types
 export type {
 	// Client options
@@ -89,6 +101,12 @@ export type {
 	EvaluateOptions,
 	FillOptions,
 	HoverOptions,
+	// Intervention (Human-in-the-Loop)
+	Intervention,
+	InterventionCreatedInfo,
+	InterventionOptions,
+	InterventionResult,
+	InterventionStatus,
 	ListSessionsResponse,
 	NavigateOptions,
 	NavigateResult,

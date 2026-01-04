@@ -9,7 +9,12 @@ import type {
 	PlaywrightMethod,
 	ServerMessage,
 } from "../protocol/types";
-import { isPongMessage, isResultMessage } from "../protocol/types";
+import {
+	isInterventionCompletedMessage,
+	isInterventionCreatedMessage,
+	isPongMessage,
+	isResultMessage,
+} from "../protocol/types";
 import { BrowserdError } from "./errors";
 import { CommandQueue } from "./internal/command-queue";
 import { ConnectionManager } from "./internal/connection";
@@ -23,6 +28,8 @@ import type {
 	EvaluateOptions,
 	FillOptions,
 	HoverOptions,
+	InterventionOptions,
+	InterventionResult,
 	ListSessionsResponse,
 	NavigateOptions,
 	NavigateResult,
@@ -50,6 +57,20 @@ interface IConnectionManager {
 }
 
 /**
+ * Pending intervention request
+ */
+interface PendingIntervention {
+	resolve: (result: InterventionResult) => void;
+	reject: (error: Error) => void;
+	interventionId?: string;
+	viewerUrl?: string;
+	timeout?: ReturnType<typeof setTimeout>;
+	reason: string;
+	instructions: string;
+	onCreated?: InterventionOptions["onCreated"];
+}
+
+/**
  * Client for connecting to and controlling a remote browserd instance
  */
 export class BrowserdClient {
@@ -57,6 +78,7 @@ export class BrowserdClient {
 	private commands: CommandQueue;
 	private defaultTimeout: number;
 	private pingHandlers: Array<(latency: number) => void> = [];
+	private pendingInterventions = new Map<string, PendingIntervention>();
 	private transport: TransportType;
 	private baseUrl: string;
 	private options: BrowserdClientOptions;
@@ -407,6 +429,89 @@ export class BrowserdClient {
 	}
 
 	// ============================================================================
+	// Human Intervention (Human-in-the-Loop)
+	// ============================================================================
+
+	/**
+	 * Request human intervention for the current session
+	 *
+	 * This method pauses browser automation and requests a human to take over.
+	 * Use this when the agent encounters something it cannot automate, such as:
+	 * - CAPTCHAs or verification challenges
+	 * - Complex authentication flows
+	 * - Content that requires human judgment
+	 *
+	 * The method will block until the human completes the intervention and
+	 * clicks the "Mark Complete" button in the viewer.
+	 *
+	 * @param options - Intervention options
+	 * @param options.reason - Why intervention is needed (e.g., "CAPTCHA detected")
+	 * @param options.instructions - What the human should do
+	 * @param options.timeout - Optional timeout in ms (default: no timeout)
+	 *
+	 * @returns The intervention result with viewer URL and completion time
+	 *
+	 * @example
+	 * ```typescript
+	 * // Request intervention when CAPTCHA detected
+	 * const result = await client.requestIntervention({
+	 *   reason: "CAPTCHA detected on login page",
+	 *   instructions: "Please solve the CAPTCHA and click 'Mark Complete' when done",
+	 * });
+	 * console.log(`Human completed at: ${result.resolvedAt}`);
+	 * ```
+	 */
+	async requestIntervention(
+		options: InterventionOptions,
+	): Promise<InterventionResult> {
+		if (!this.connection.isConnected()) {
+			throw BrowserdError.notConnected();
+		}
+
+		const id = `int-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+		return new Promise<InterventionResult>((resolve, reject) => {
+			const pending: PendingIntervention = {
+				resolve,
+				reject,
+				reason: options.reason,
+				instructions: options.instructions,
+				onCreated: options.onCreated,
+			};
+
+			// Set up timeout if specified
+			if (options.timeout) {
+				pending.timeout = setTimeout(() => {
+					this.pendingInterventions.delete(id);
+					reject(
+						new BrowserdError(
+							"COMMAND_TIMEOUT",
+							`Intervention request timed out after ${options.timeout}ms`,
+						),
+					);
+				}, options.timeout);
+			}
+
+			this.pendingInterventions.set(id, pending);
+
+			// Send the intervention request
+			// Note: We use "requestIntervention" as the method, which the server
+			// handles specially (not a Playwright command)
+			const message = {
+				id,
+				type: "cmd" as const,
+				method: "requestIntervention",
+				params: {
+					reason: options.reason,
+					instructions: options.instructions,
+				},
+			};
+
+			this.connection.send(message);
+		});
+	}
+
+	// ============================================================================
 	// Ping/Latency
 	// ============================================================================
 
@@ -481,6 +586,47 @@ export class BrowserdClient {
 			// Notify all pending ping handlers
 			for (const handler of this.pingHandlers) {
 				handler(latency);
+			}
+		} else if (isInterventionCreatedMessage(message)) {
+			// Store intervention info for the pending request
+			const pending = this.pendingInterventions.get(message.id);
+			if (pending) {
+				pending.interventionId = message.interventionId;
+				pending.viewerUrl = message.viewerUrl;
+				// Call the onCreated callback if provided (for notifications)
+				if (pending.onCreated) {
+					try {
+						const result = pending.onCreated({
+							interventionId: message.interventionId,
+							viewerUrl: message.viewerUrl,
+							reason: pending.reason,
+							instructions: pending.instructions,
+						});
+						// Handle async callbacks (don't block)
+						if (result instanceof Promise) {
+							result.catch((err) =>
+								console.error("[browserd] onCreated callback error:", err),
+							);
+						}
+					} catch (err) {
+						console.error("[browserd] onCreated callback error:", err);
+					}
+				}
+				// Don't resolve yet - wait for intervention_completed
+			}
+		} else if (isInterventionCompletedMessage(message)) {
+			// Resolve the pending intervention request
+			const pending = this.pendingInterventions.get(message.id);
+			if (pending) {
+				if (pending.timeout) {
+					clearTimeout(pending.timeout);
+				}
+				this.pendingInterventions.delete(message.id);
+				pending.resolve({
+					interventionId: message.interventionId,
+					viewerUrl: pending.viewerUrl ?? "",
+					resolvedAt: new Date(message.resolvedAt),
+				});
 			}
 		}
 		// Frame and event messages are not handled by the client

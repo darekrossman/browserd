@@ -1,9 +1,12 @@
 import { gateway, stepCountIs, ToolLoopAgent } from "ai";
-import { createClient, LocalProvider } from "@/sdk";
+import { createClient, DockerContainerProvider, LocalProvider } from "@/sdk";
 import { createTaskTool } from "./task-tool";
 
 async function main() {
-	const provider = new LocalProvider();
+	// const provider = new LocalProvider();
+	const provider = new DockerContainerProvider({
+		imageName: "browserd-sandbox-rtc",
+	});
 
 	console.log("\nStarting AI task...\n");
 
@@ -17,8 +20,7 @@ async function main() {
 		});
 
 		const stream = await agent.stream({
-			prompt:
-				"visit the top tech news sites and give me a report of the top headlines for today",
+			prompt: "get the top headlines from techcrunch.com",
 		});
 
 		for await (const chunk of stream.fullStream) {

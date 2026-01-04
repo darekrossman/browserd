@@ -223,6 +223,152 @@ export function generateViewerHTML(options: ViewerOptions = {}): string {
     }
 
     .hidden { display: none !important; }
+
+    /* Intervention Overlay */
+    .intervention-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.85);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .intervention-modal {
+      background: #111;
+      border: 1px solid #333;
+      border-radius: 8px;
+      max-width: 500px;
+      width: 90%;
+      padding: 24px;
+    }
+
+    .intervention-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid #222;
+    }
+
+    .intervention-icon {
+      width: 40px;
+      height: 40px;
+      background: #2c3a4a;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+    }
+
+    .intervention-title {
+      flex: 1;
+    }
+
+    .intervention-title h2 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #ddd;
+      margin-bottom: 4px;
+    }
+
+    .intervention-title .intervention-id {
+      font-size: 10px;
+      color: #555;
+    }
+
+    .intervention-timer {
+      font-size: 11px;
+      color: #666;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .intervention-reason {
+      background: #1a1a1a;
+      border: 1px solid #222;
+      border-radius: 4px;
+      padding: 12px;
+      margin-bottom: 16px;
+    }
+
+    .intervention-reason-label {
+      font-size: 10px;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+
+    .intervention-reason-text {
+      font-size: 13px;
+      color: #aaa;
+    }
+
+    .intervention-instructions {
+      margin-bottom: 24px;
+    }
+
+    .intervention-instructions-label {
+      font-size: 10px;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .intervention-instructions-text {
+      font-size: 12px;
+      color: #888;
+      line-height: 1.5;
+    }
+
+    .intervention-actions {
+      display: flex;
+      gap: 12px;
+    }
+
+    .intervention-complete-btn {
+      flex: 1;
+      padding: 12px 20px;
+      background: #2c4a2c;
+      border: 1px solid #3a5a3a;
+      border-radius: 4px;
+      color: #8fbc8f;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .intervention-complete-btn:hover {
+      background: #3a5a3a;
+      border-color: #4a6a4a;
+      color: #a0cca0;
+    }
+
+    .intervention-complete-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .intervention-error {
+      margin-top: 12px;
+      padding: 8px 12px;
+      background: #2c2020;
+      border: 1px solid #4a2c2c;
+      border-radius: 4px;
+      font-size: 11px;
+      color: #c88;
+    }
   </style>
 </head>
 <body>
@@ -259,6 +405,34 @@ export function generateViewerHTML(options: ViewerOptions = {}): string {
       </div>
     </div>
   </header>
+
+  <!-- Intervention Overlay (hidden by default) -->
+  <div id="intervention-overlay" class="intervention-overlay hidden">
+    <div class="intervention-modal">
+      <div class="intervention-header">
+        <div class="intervention-icon">&#9888;</div>
+        <div class="intervention-title">
+          <h2>Human Intervention Required</h2>
+          <div class="intervention-id" id="intervention-id"></div>
+        </div>
+        <div class="intervention-timer" id="intervention-timer">00:00</div>
+      </div>
+      <div class="intervention-reason">
+        <div class="intervention-reason-label">Reason</div>
+        <div class="intervention-reason-text" id="intervention-reason"></div>
+      </div>
+      <div class="intervention-instructions">
+        <div class="intervention-instructions-label">Instructions</div>
+        <div class="intervention-instructions-text" id="intervention-instructions"></div>
+      </div>
+      <div class="intervention-actions">
+        <button id="intervention-complete-btn" class="intervention-complete-btn">
+          Mark as Complete
+        </button>
+      </div>
+      <div id="intervention-error" class="intervention-error hidden"></div>
+    </div>
+  </div>
 
   <main class="main">
     <div class="viewer-container">
@@ -676,6 +850,118 @@ export function generateViewerHTML(options: ViewerOptions = {}): string {
       `
 					: ""
 			}
+
+      // Intervention handling
+      const interventionOverlay = document.getElementById('intervention-overlay');
+      const interventionIdEl = document.getElementById('intervention-id');
+      const interventionReasonEl = document.getElementById('intervention-reason');
+      const interventionInstructionsEl = document.getElementById('intervention-instructions');
+      const interventionTimerEl = document.getElementById('intervention-timer');
+      const interventionCompleteBtn = document.getElementById('intervention-complete-btn');
+      const interventionErrorEl = document.getElementById('intervention-error');
+
+      let interventionStartTime = null;
+      let interventionTimerInterval = null;
+
+      // Check for intervention query param
+      const interventionId = urlParams.get('intervention');
+
+      // Format elapsed time as MM:SS
+      function formatElapsedTime(ms) {
+        const totalSeconds = Math.floor(ms / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0');
+      }
+
+      // Update intervention timer
+      function updateInterventionTimer() {
+        if (interventionStartTime) {
+          const elapsed = Date.now() - interventionStartTime;
+          interventionTimerEl.textContent = formatElapsedTime(elapsed);
+        }
+      }
+
+      // Show intervention overlay
+      function showIntervention(data) {
+        interventionIdEl.textContent = data.id;
+        interventionReasonEl.textContent = data.reason;
+        interventionInstructionsEl.textContent = data.instructions;
+        interventionStartTime = new Date(data.createdAt).getTime();
+        updateInterventionTimer();
+        interventionTimerInterval = setInterval(updateInterventionTimer, 1000);
+        interventionOverlay.classList.remove('hidden');
+      }
+
+      // Hide intervention overlay
+      function hideIntervention() {
+        interventionOverlay.classList.add('hidden');
+        if (interventionTimerInterval) {
+          clearInterval(interventionTimerInterval);
+          interventionTimerInterval = null;
+        }
+      }
+
+      // Show intervention error
+      function showInterventionError(message) {
+        interventionErrorEl.textContent = message;
+        interventionErrorEl.classList.remove('hidden');
+      }
+
+      // Fetch and display intervention if ID is present
+      async function initIntervention() {
+        if (!interventionId) return;
+
+        try {
+          const response = await fetch('/api/sessions/${sessionId}/intervention/' + interventionId);
+          if (!response.ok) {
+            throw new Error('Intervention not found');
+          }
+          const data = await response.json();
+          if (data.status === 'pending') {
+            showIntervention(data);
+          } else {
+            console.log('Intervention already ' + data.status);
+          }
+        } catch (err) {
+          console.error('Failed to load intervention:', err);
+        }
+      }
+
+      // Complete intervention
+      async function completeIntervention() {
+        if (!interventionId) return;
+
+        interventionCompleteBtn.disabled = true;
+        interventionCompleteBtn.textContent = 'Completing...';
+        interventionErrorEl.classList.add('hidden');
+
+        try {
+          const response = await fetch('/api/sessions/${sessionId}/intervention/' + interventionId + '/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || 'Failed to complete intervention');
+          }
+
+          // Success - hide the overlay
+          hideIntervention();
+          interventionCompleteBtn.textContent = 'Completed!';
+        } catch (err) {
+          showInterventionError(err.message);
+          interventionCompleteBtn.disabled = false;
+          interventionCompleteBtn.textContent = 'Mark as Complete';
+        }
+      }
+
+      // Wire up complete button
+      interventionCompleteBtn.addEventListener('click', completeIntervention);
+
+      // Initialize intervention if present
+      initIntervention();
 
       // Start connection
       connect();

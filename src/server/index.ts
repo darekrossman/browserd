@@ -12,6 +12,7 @@ import {
 } from "../client/viewer-template";
 import {
 	type CommandMessage,
+	createErrorResult,
 	type InputMessage,
 	type ServerMessage,
 	serializeServerMessage,
@@ -21,6 +22,10 @@ import {
 	createLivenessResponse,
 	createReadinessResponse,
 } from "./health";
+import {
+	getInterventionManager,
+	type InterventionManager,
+} from "./intervention-manager";
 import { createSessionManager, type SessionManager } from "./session-manager";
 import {
 	createWebSocketData,
@@ -69,6 +74,7 @@ const HOST = process.env.HOST || "0.0.0.0";
 // Service instances
 let sessionManager: SessionManager | null = null;
 let wsHandler: MultiSessionWSHandler | null = null;
+let interventionManager: InterventionManager | null = null;
 
 /**
  * Get the base URL for session API responses
@@ -83,6 +89,7 @@ function getBaseUrl(): string {
  */
 async function initBrowser(): Promise<void> {
 	sessionManager = createSessionManager();
+	interventionManager = getInterventionManager(getBaseUrl());
 
 	console.log("[browserd] Initializing session manager...");
 	await sessionManager.initialize();
@@ -92,6 +99,13 @@ async function initBrowser(): Promise<void> {
 	wsHandler = new MultiSessionWSHandler({
 		sessionManager,
 		onCommand: async (ws, cmd, session) => {
+			// Handle intervention requests specially - not a Playwright command
+			// Cast to string since requestIntervention isn't in PlaywrightMethod type
+			if ((cmd.method as string) === "requestIntervention") {
+				await handleInterventionCommand(ws, cmd, session.id);
+				return;
+			}
+
 			const result = await session.commandQueue.enqueue(cmd);
 			wsHandler?.send(ws, result);
 
@@ -114,6 +128,68 @@ async function initBrowser(): Promise<void> {
 	});
 
 	console.log("[browserd] Ready - create sessions via POST /api/sessions");
+}
+
+/**
+ * Handle requestIntervention command
+ */
+async function handleInterventionCommand(
+	ws: ServerWebSocket<WebSocketData>,
+	cmd: CommandMessage,
+	sessionId: string,
+): Promise<void> {
+	if (!interventionManager) {
+		wsHandler?.send(
+			ws,
+			createErrorResult(cmd.id, "SERVER_ERROR", "Intervention manager not initialized"),
+		);
+		return;
+	}
+
+	const { reason, instructions } = cmd.params as {
+		reason?: string;
+		instructions?: string;
+	};
+
+	if (!reason || !instructions) {
+		wsHandler?.send(
+			ws,
+			createErrorResult(
+				cmd.id,
+				"INVALID_PARAMS",
+				"reason and instructions are required",
+			),
+		);
+		return;
+	}
+
+	try {
+		// Create intervention - this will throw if one already pending
+		const intervention = interventionManager.create({
+			sessionId,
+			reason,
+			instructions,
+			commandId: cmd.id,
+			socket: ws,
+		});
+
+		// Send intervention_created message (the SDK will block waiting for intervention_completed)
+		interventionManager.sendCreatedMessage(intervention);
+
+		console.log(
+			`[browserd] Intervention ${intervention.id} created for session ${sessionId}`,
+		);
+		console.log(`[browserd] Viewer URL: ${interventionManager.getViewerUrl(intervention)}`);
+
+		// Note: We don't send a result here - the SDK is waiting for intervention_completed
+		// which will be sent when the human completes the intervention
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		wsHandler?.send(
+			ws,
+			createErrorResult(cmd.id, "INTERVENTION_ERROR", message),
+		);
+	}
 }
 
 /**
@@ -413,6 +489,89 @@ async function handleSessionApiRequest(req: Request): Promise<Response | null> {
 		}
 
 		return Response.json({ deleted: true, id: sessionId });
+	}
+
+	// Intervention endpoints
+	// GET /api/sessions/:id/intervention/:interventionId - Get intervention details
+	const interventionGetMatch = path.match(
+		/^\/api\/sessions\/([^/]+)\/intervention\/([^/]+)$/,
+	);
+	if (req.method === "GET" && interventionGetMatch) {
+		const [, sessionId, interventionId] = interventionGetMatch;
+
+		if (!interventionManager) {
+			return Response.json(
+				{ error: "Intervention manager not initialized" },
+				{ status: 503 },
+			);
+		}
+
+		const intervention = interventionManager.get(interventionId!);
+		if (!intervention || intervention.sessionId !== sessionId) {
+			return Response.json(
+				{ error: "Intervention not found", code: "INTERVENTION_NOT_FOUND" },
+				{ status: 404 },
+			);
+		}
+
+		return Response.json({
+			id: intervention.id,
+			sessionId: intervention.sessionId,
+			reason: intervention.reason,
+			instructions: intervention.instructions,
+			status: intervention.status,
+			createdAt: intervention.createdAt.toISOString(),
+			resolvedAt: intervention.resolvedAt?.toISOString(),
+		});
+	}
+
+	// POST /api/sessions/:id/intervention/:interventionId/complete - Complete intervention
+	const interventionCompleteMatch = path.match(
+		/^\/api\/sessions\/([^/]+)\/intervention\/([^/]+)\/complete$/,
+	);
+	if (req.method === "POST" && interventionCompleteMatch) {
+		const [, sessionId, interventionId] = interventionCompleteMatch;
+
+		if (!interventionManager) {
+			return Response.json(
+				{ error: "Intervention manager not initialized" },
+				{ status: 503 },
+			);
+		}
+
+		const intervention = interventionManager.get(interventionId!);
+		if (!intervention || intervention.sessionId !== sessionId) {
+			return Response.json(
+				{ error: "Intervention not found", code: "INTERVENTION_NOT_FOUND" },
+				{ status: 404 },
+			);
+		}
+
+		if (intervention.status !== "pending") {
+			return Response.json(
+				{
+					error: `Intervention is ${intervention.status}, cannot complete`,
+					code: "INTERVENTION_NOT_PENDING",
+				},
+				{ status: 400 },
+			);
+		}
+
+		const completed = interventionManager.complete(interventionId!);
+		if (!completed) {
+			return Response.json(
+				{ error: "Failed to complete intervention" },
+				{ status: 500 },
+			);
+		}
+
+		console.log(`[browserd] Intervention ${interventionId} completed by human`);
+
+		return Response.json({
+			status: "completed",
+			interventionId: intervention.id,
+			resolvedAt: intervention.resolvedAt?.toISOString(),
+		});
 	}
 
 	return null;

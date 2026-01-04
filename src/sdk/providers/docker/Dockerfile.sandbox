@@ -39,7 +39,7 @@ RUN dnf update -y && \
 # Switch to vercel-sandbox user
 USER vercel-sandbox
 
-# Create directories, install Bun, rebrowser-playwright, and Chromium
+# Create directories
 RUN mkdir -p $HOME/.bun \
     $HOME/.cache \
     $HOME/.local/bin

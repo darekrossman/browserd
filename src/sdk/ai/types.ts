@@ -2,6 +2,7 @@
  * Types for the AI SDK browser tool
  */
 
+import type { NotificationProvider } from "../notifications";
 import type { SandboxProvider } from "../providers/types";
 
 /**
@@ -36,4 +37,14 @@ export interface CreateBrowserToolOptions {
 	 * Default timeout for operations in milliseconds (default: 30000)
 	 */
 	defaultTimeout?: number;
+
+	/**
+	 * Notification provider for human-in-the-loop interventions.
+	 * When an agent requests human intervention, this provider is called
+	 * to notify the user with the viewer URL.
+	 *
+	 * If not provided, interventions will still work but no notifications
+	 * will be sent (the viewer URL is returned in the tool result).
+	 */
+	notificationProvider?: NotificationProvider;
 }

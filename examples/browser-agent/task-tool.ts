@@ -2,6 +2,7 @@ import { gateway, ToolLoopAgent, tool } from "ai";
 import { z } from "zod";
 import { createBrowserTool } from "@/sdk/ai";
 import type { SandboxProvider } from "@/sdk/providers";
+import { truncateObjectFields } from "./utils";
 
 const description = `Spawns a specialized subagent to perform a focused task.\n\nUse this tool to delegate complex or specialized work to a subagent with its own conversation context. The subagent will execute to completion and return a summary of what it accomplished.`;
 
@@ -34,16 +35,28 @@ export function createTaskTool(provider: SandboxProvider) {
 						case "text-end":
 							process.stdout.write("\n");
 							break;
-						case "tool-call":
+						case "tool-call": {
+							const toolName =
+								chunk.toolName.length > 500
+									? `${chunk.toolName.slice(0, 500)}...`
+									: chunk.toolName;
+							const truncatedInput = truncateObjectFields(chunk.input);
 							console.log(
-								`\x1b[90m\n[SUBAGENT][Tool Call: ${chunk.toolName}] ${JSON.stringify(chunk.input)}\x1b[0m`,
+								`\x1b[90m\n[SUBAGENT][Tool Call: ${toolName}] ${JSON.stringify(truncatedInput)}\x1b[0m`,
 							);
 							break;
-						case "tool-result":
+						}
+						case "tool-result": {
+							const toolName =
+								chunk.toolName.length > 500
+									? `${chunk.toolName.slice(0, 500)}...`
+									: chunk.toolName;
+							const truncatedOutput = truncateObjectFields(chunk.output);
 							console.log(
-								`\x1b[90m\n[SUBAGENT][Tool Result: ${chunk.toolName}] ${JSON.stringify(chunk.output)}\x1b[0m`,
+								`\x1b[90m\n[SUBAGENT][Tool Result: ${toolName}] ${JSON.stringify(truncatedOutput)}\x1b[0m`,
 							);
 							break;
+						}
 						case "error":
 							console.log(`\x1b[90m[SUBAGENT][ERROR] ${chunk.error}\x1b[0m`);
 							break;

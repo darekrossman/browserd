@@ -56,6 +56,7 @@ Operations:
 - screenshot: Capture what the page looks like
 - goBack/goForward/reload: Browser navigation
 - setViewport: Change the browser window size
+- requestHumanIntervention: Request human help for CAPTCHAs, login walls, or verification challenges
 - closeSession: Close your browser session (CALL THIS WHEN DONE)
 
 Selectors - how to identify elements:
@@ -64,13 +65,40 @@ Selectors - how to identify elements:
 - Role/ARIA: "role=button[name='Submit']"
 - XPath: "xpath=//button[@type='submit']"
 
+HUMAN INTERVENTION - When you encounter obstacles you cannot automate:
+Use requestHumanIntervention when you detect:
+- CAPTCHAs (reCAPTCHA, hCaptcha, image challenges)
+- Login walls requiring credentials you don't have
+- SMS/email verification codes
+- "Are you human?" challenges
+- Any blocker you cannot solve programmatically
+
+Detection patterns (use evaluate to check):
+- CAPTCHA iframes: document.querySelector('iframe[src*="recaptcha"], iframe[src*="hcaptcha"]')
+- CAPTCHA divs: document.querySelector('.g-recaptcha, .h-captcha, [data-captcha]')
+- Challenge pages: Look for "verify", "robot", "human" text in screenshots
+
+Human intervention workflow:
+1. Detect blocker via screenshot analysis or evaluate
+2. Call requestHumanIntervention with clear reason and instructions
+3. Tool blocks and returns viewerUrl where human can see the browser
+4. Human resolves the issue and clicks "Mark Complete" in the viewer
+5. Tool unblocks and returns - you can continue automation
+
+Example:
+  requestHumanIntervention({
+    reason: "CAPTCHA detected on login page",
+    instructions: "Please solve the CAPTCHA puzzle, then click Mark Complete"
+  })
+
 Best practices:
 - Always save and reuse the sessionId from your first call
-- Always use 'type' to enter text into form inputs. 
+- Always use 'type' to enter text into form inputs.
 - Only use fill to empty existing text in form inputs.
 - Use 'waitForSelector' before clicking elements that load dynamically
 - Use 'evaluate' to extract text content: evaluate("document.querySelector('h1')?.textContent")
 - Take screenshots to verify the page state when debugging
+- Request human intervention early when you detect blockers - don't retry failed automation
 - ALWAYS call closeSession when you're done browsing`;
 
 /**
@@ -79,11 +107,12 @@ Best practices:
  * @param options - Configuration options
  * @param options.provider - Sandbox provider for creating browser instances
  * @param options.defaultTimeout - Default timeout for operations (default: 30000ms)
+ * @param options.notificationProvider - Optional notification provider for human-in-the-loop interventions
  * @returns AI SDK tool for browser automation
  */
 export function createBrowserTool(options: CreateBrowserToolOptions) {
-	const { provider, defaultTimeout = 30000 } = options;
-	const executor = createExecutor(provider);
+	const { provider, defaultTimeout = 30000, notificationProvider } = options;
+	const executor = createExecutor(provider, { notificationProvider });
 
 	return tool({
 		description,

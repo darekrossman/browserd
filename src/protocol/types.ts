@@ -171,6 +171,38 @@ export interface PongMessage {
 	t: number;
 }
 
+// ============================================================================
+// Intervention Messages (Human-in-the-Loop)
+// ============================================================================
+
+/**
+ * Intervention created message - sent when SDK requests human intervention
+ * The SDK should block until receiving InterventionCompletedMessage
+ */
+export interface InterventionCreatedMessage {
+	type: "intervention_created";
+	/** Command ID that requested the intervention */
+	id: string;
+	/** Unique intervention identifier */
+	interventionId: string;
+	/** Viewer URL with intervention parameter for human to access */
+	viewerUrl: string;
+}
+
+/**
+ * Intervention completed message - sent when human completes intervention
+ * The SDK should unblock and continue after receiving this
+ */
+export interface InterventionCompletedMessage {
+	type: "intervention_completed";
+	/** Command ID that requested the intervention */
+	id: string;
+	/** Intervention identifier */
+	interventionId: string;
+	/** Timestamp when intervention was resolved */
+	resolvedAt: string;
+}
+
 /**
  * Union of all server-to-client message types
  */
@@ -178,7 +210,9 @@ export type ServerMessage =
 	| FrameMessage
 	| ResultMessage
 	| EventMessage
-	| PongMessage;
+	| PongMessage
+	| InterventionCreatedMessage
+	| InterventionCompletedMessage;
 
 // ============================================================================
 // Type Guards
@@ -296,6 +330,10 @@ export function isServerMessage(value: unknown): value is ServerMessage {
 	if (msg.type === "result") return isResultMessage(value);
 	if (msg.type === "event") return isEventMessage(value);
 	if (msg.type === "pong") return isPongMessage(value);
+	if (msg.type === "intervention_created")
+		return isInterventionCreatedMessage(value);
+	if (msg.type === "intervention_completed")
+		return isInterventionCompletedMessage(value);
 
 	return false;
 }
@@ -367,6 +405,40 @@ export function isPongMessage(value: unknown): value is PongMessage {
 	const msg = value as Record<string, unknown>;
 
 	return msg.type === "pong" && typeof msg.t === "number";
+}
+
+/**
+ * Check if a value is an InterventionCreatedMessage
+ */
+export function isInterventionCreatedMessage(
+	value: unknown,
+): value is InterventionCreatedMessage {
+	if (typeof value !== "object" || value === null) return false;
+	const msg = value as Record<string, unknown>;
+
+	return (
+		msg.type === "intervention_created" &&
+		typeof msg.id === "string" &&
+		typeof msg.interventionId === "string" &&
+		typeof msg.viewerUrl === "string"
+	);
+}
+
+/**
+ * Check if a value is an InterventionCompletedMessage
+ */
+export function isInterventionCompletedMessage(
+	value: unknown,
+): value is InterventionCompletedMessage {
+	if (typeof value !== "object" || value === null) return false;
+	const msg = value as Record<string, unknown>;
+
+	return (
+		msg.type === "intervention_completed" &&
+		typeof msg.id === "string" &&
+		typeof msg.interventionId === "string" &&
+		typeof msg.resolvedAt === "string"
+	);
 }
 
 // ============================================================================
@@ -462,5 +534,37 @@ export function createPongMessage(t: number): PongMessage {
 	return {
 		type: "pong",
 		t,
+	};
+}
+
+/**
+ * Create an intervention created message
+ */
+export function createInterventionCreatedMessage(
+	id: string,
+	interventionId: string,
+	viewerUrl: string,
+): InterventionCreatedMessage {
+	return {
+		type: "intervention_created",
+		id,
+		interventionId,
+		viewerUrl,
+	};
+}
+
+/**
+ * Create an intervention completed message
+ */
+export function createInterventionCompletedMessage(
+	id: string,
+	interventionId: string,
+	resolvedAt: string,
+): InterventionCompletedMessage {
+	return {
+		type: "intervention_completed",
+		id,
+		interventionId,
+		resolvedAt,
 	};
 }

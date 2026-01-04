@@ -26,6 +26,7 @@ export const browserToolInputSchema = z.object({
 			"screenshot",
 			"setViewport",
 			"closeSession",
+			"requestHumanIntervention",
 		])
 		.describe("The browser operation to perform"),
 
@@ -125,6 +126,22 @@ export const browserToolInputSchema = z.object({
 		.number()
 		.optional()
 		.describe("Viewport height in pixels (setViewport only)"),
+
+	// Human Intervention
+	reason: z
+		.string()
+		.optional()
+		.describe(
+			"Why human intervention is needed (requestHumanIntervention only). " +
+				"E.g., 'CAPTCHA detected', 'Login required', 'Complex verification'",
+		),
+	instructions: z
+		.string()
+		.optional()
+		.describe(
+			"Clear instructions for the human on what to do (requestHumanIntervention only). " +
+				"E.g., 'Please solve the CAPTCHA and click Mark Complete when done'",
+		),
 });
 
 export type BrowserToolInput = z.infer<typeof browserToolInputSchema>;

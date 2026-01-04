@@ -281,7 +281,7 @@ export interface SessionInfo {
 	/** Unique session identifier */
 	id: string;
 	/** Session status */
-	status: "creating" | "ready" | "closing" | "closed";
+	status: "creating" | "ready" | "closing" | "closed" | "awaiting_intervention";
 	/** WebSocket URL for this session */
 	wsUrl: string;
 	/** SSE stream URL for this session */
@@ -303,6 +303,8 @@ export interface SessionInfo {
 	lastActivity?: number;
 	/** Current page URL */
 	url?: string;
+	/** Active intervention if session is awaiting intervention */
+	intervention?: Intervention;
 }
 
 /**
@@ -315,6 +317,74 @@ export interface ListSessionsResponse {
 	count: number;
 	/** Maximum allowed sessions */
 	maxSessions: number;
+}
+
+// ============================================================================
+// Intervention Types (Human-in-the-Loop)
+// ============================================================================
+
+/**
+ * Status of a human intervention request
+ */
+export type InterventionStatus = "pending" | "completed" | "cancelled";
+
+/**
+ * A human intervention request
+ */
+export interface Intervention {
+	/** Unique intervention identifier */
+	id: string;
+	/** Session ID this intervention belongs to */
+	sessionId: string;
+	/** Reason for requesting intervention (e.g., "CAPTCHA detected") */
+	reason: string;
+	/** Instructions for the human (e.g., "Please solve the CAPTCHA") */
+	instructions: string;
+	/** Current status */
+	status: InterventionStatus;
+	/** Creation timestamp */
+	createdAt: Date;
+	/** Resolution timestamp (when human completed) */
+	resolvedAt?: Date;
+}
+
+/**
+ * Callback called when intervention is created (before human completes it)
+ */
+export interface InterventionCreatedInfo {
+	interventionId: string;
+	viewerUrl: string;
+	reason: string;
+	instructions: string;
+}
+
+/**
+ * Options for requesting human intervention
+ */
+export interface InterventionOptions {
+	/** Reason for requesting intervention (e.g., "CAPTCHA detected") */
+	reason: string;
+	/** Instructions for the human (e.g., "Please solve the CAPTCHA") */
+	instructions: string;
+	/** Optional timeout in milliseconds (default: no timeout) */
+	timeout?: number;
+	/**
+	 * Callback called when the intervention is created and the viewer URL is available.
+	 * Use this to send notifications to the user before waiting for completion.
+	 */
+	onCreated?: (info: InterventionCreatedInfo) => void | Promise<void>;
+}
+
+/**
+ * Result of a human intervention request
+ */
+export interface InterventionResult {
+	/** Intervention ID */
+	interventionId: string;
+	/** Viewer URL with intervention parameter for human to access */
+	viewerUrl: string;
+	/** Timestamp when intervention was resolved */
+	resolvedAt: Date;
 }
 
 // ============================================================================
